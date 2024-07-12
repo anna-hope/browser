@@ -19,8 +19,6 @@ lazy_static! {
     );
 }
 
-// TODO: Add Scheme Enum to have compile time type-checking
-
 #[derive(Error, Debug)]
 pub enum URLError {
     #[error("error splitting the URL: `{0}`")]
@@ -31,11 +29,37 @@ pub enum URLError {
 
     #[error("invalid TCP response: {0}")]
     InvalidResponse(String),
+
+    #[error("unknown URL scheme: {0}")]
+    UnknownScheme(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
+pub enum Scheme {
+    HTTP,
+    HTTPS,
+}
+
+impl Scheme {
+    fn from_str(scheme: &str) -> Result<Self, URLError> {
+        match scheme {
+            "http" => Ok(Self::HTTP),
+            "https" => Ok(Self::HTTPS),
+            _ => Err(URLError::UnknownScheme(scheme.to_string())),
+        }
+    }
+
+    fn default_port(&self) -> u16 {
+        match self {
+            Self::HTTP => 80,
+            Self::HTTPS => 443,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct URL {
-    pub scheme: String,
+    pub scheme: Scheme,
     pub path: String,
     pub host: String,
     pub port: Option<u16>,
@@ -46,6 +70,7 @@ impl URL {
         let (scheme, url) = url
             .split_once("://")
             .ok_or_else(|| URLError::Split(url.to_string()))?;
+        let scheme = Scheme::from_str(scheme)?;
 
         let url = if url.contains('/') {
             url.to_string()
@@ -65,7 +90,7 @@ impl URL {
         }
 
         Ok(Self {
-            scheme: scheme.to_string(),
+            scheme,
             host: host.to_string(),
             path,
             port,
@@ -76,16 +101,15 @@ impl URL {
         let read_buf = {
             let mut read_buf = String::new();
             let request = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", self.path, self.host);
-            match self.scheme.as_str() {
-                "http" => {
-                    let port = self.port.unwrap_or(80);
+            let port = self.port.unwrap_or(self.scheme.default_port());
+            match self.scheme {
+                Scheme::HTTP => {
                     let mut stream = TcpStream::connect(format!("{}:{port}", self.host))?;
 
                     stream.write_all(request.as_bytes())?;
                     stream.read_to_string(&mut read_buf)?;
                 }
-                "https" => {
-                    let port = self.port.unwrap_or(443);
+                Scheme::HTTPS => {
                     let mut client = rustls::ClientConnection::new(
                         CONFIG.clone(),
                         self.host.clone().try_into()?,
@@ -97,7 +121,6 @@ impl URL {
 
                     tls.read_to_string(&mut read_buf)?;
                 }
-                _ => return Err(anyhow::anyhow!("Unsupported URL scheme: {}", self.scheme)),
             }
             read_buf
         };
