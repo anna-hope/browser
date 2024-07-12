@@ -2,9 +2,24 @@ use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use lazy_static::lazy_static;
 use thiserror::Error;
+
+lazy_static! {
+    static ref ROOT_STORE: Arc<rustls::RootCertStore> = Arc::new(rustls::RootCertStore::from_iter(
+        webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
+    ));
+    static ref CONFIG: Arc<rustls::ClientConfig> = Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(ROOT_STORE.clone())
+            .with_no_client_auth()
+    );
+}
+
+// TODO: Add Scheme Enum to have compile time type-checking
 
 #[derive(Error, Debug)]
 pub enum URLError {
@@ -23,6 +38,7 @@ pub struct URL {
     pub scheme: String,
     pub path: String,
     pub host: String,
+    pub port: Option<u16>,
 }
 
 impl URL {
@@ -30,7 +46,6 @@ impl URL {
         let (scheme, url) = url
             .split_once("://")
             .ok_or_else(|| URLError::Split(url.to_string()))?;
-        assert_eq!(scheme, "http");
 
         let url = if url.contains("/") {
             url.to_string()
@@ -38,25 +53,55 @@ impl URL {
             format!("{url}/")
         };
 
-        let (host, url) = url
+        let (mut host, url) = url
             .split_once("/")
             .ok_or_else(|| URLError::Split(url.to_string()))?;
         let path = format!("/{url}");
+
+        let mut port = None;
+        if let Some((new_host, port_str)) = host.split_once(":") {
+            host = new_host;
+            port = Some(port_str.parse::<u16>()?);
+        }
 
         Ok(Self {
             scheme: scheme.to_string(),
             host: host.to_string(),
             path,
+            port,
         })
     }
 
     pub fn request(&self) -> Result<String> {
-        let mut stream = TcpStream::connect(format!("{}:80", self.host))?;
-        let request = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", self.path, self.host);
+        let read_buf = {
+            let mut read_buf = String::new();
+            let request = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", self.path, self.host);
+            match self.scheme.as_str() {
+                "http" => {
+                    let port = self.port.unwrap_or(80);
+                    let mut stream = TcpStream::connect(format!("{}:{port}", self.host))?;
 
-        stream.write_all(request.as_bytes())?;
-        let mut read_buf = String::new();
-        stream.read_to_string(&mut read_buf)?;
+                    stream.write_all(request.as_bytes())?;
+                    stream.read_to_string(&mut read_buf)?;
+                }
+                "https" => {
+                    let port = self.port.unwrap_or(443);
+                    let mut client = rustls::ClientConnection::new(
+                        CONFIG.clone(),
+                        self.host.clone().try_into()?,
+                    )?;
+
+                    let mut socket = TcpStream::connect(format!("{}:{port}", self.host))?;
+                    let mut tls = rustls::Stream::new(&mut client, &mut socket);
+                    tls.write_all(request.as_bytes())?;
+
+                    tls.read_to_string(&mut read_buf)?;
+                }
+                _ => return Err(anyhow::anyhow!("Unsupported URL scheme: {}", self.scheme)),
+            }
+            read_buf
+        };
+
         let mut lines = read_buf.lines();
         let status_line = lines
             .next()
@@ -123,6 +168,12 @@ mod tests {
     #[test]
     fn load_url() {
         let url = URL::init("http://example.org").unwrap();
+        load(&url).unwrap();
+    }
+
+    #[test]
+    fn load_url_https() {
+        let url = URL::init("https://example.org").unwrap();
         load(&url).unwrap();
     }
 }
