@@ -47,19 +47,19 @@ impl URL {
             .split_once("://")
             .ok_or_else(|| URLError::Split(url.to_string()))?;
 
-        let url = if url.contains("/") {
+        let url = if url.contains('/') {
             url.to_string()
         } else {
             format!("{url}/")
         };
 
         let (mut host, url) = url
-            .split_once("/")
+            .split_once('/')
             .ok_or_else(|| URLError::Split(url.to_string()))?;
         let path = format!("/{url}");
 
         let mut port = None;
-        if let Some((new_host, port_str)) = host.split_once(":") {
+        if let Some((new_host, port_str)) = host.split_once(':') {
             host = new_host;
             port = Some(port_str.parse::<u16>()?);
         }
@@ -108,7 +108,7 @@ impl URL {
             .ok_or_else(|| URLError::InvalidResponse(read_buf.clone()))
             .context("Can't parse status_line")?;
         let (_version, _status, _explanation) = {
-            let parts = status_line.splitn(3, " ").collect::<Vec<_>>();
+            let parts = status_line.splitn(3, ' ').collect::<Vec<_>>();
             if parts.len() < 3 {
                 return Err(URLError::InvalidResponse(read_buf.clone()))
                     .context(format!("Can't parse status_line parts: {status_line}",));
@@ -121,7 +121,7 @@ impl URL {
                 if line == r"\r\n" {
                     None
                 } else {
-                    let (header, value) = line.split_once(":")?;
+                    let (header, value) = line.split_once(':')?;
                     Some((header.to_lowercase(), value.trim().to_string()))
                 }
             }));
