@@ -62,7 +62,7 @@ pub struct URL {
     pub scheme: Scheme,
     pub path: String,
     pub host: String,
-    pub port: Option<u16>,
+    pub port: u16,
 }
 
 impl URL {
@@ -78,16 +78,16 @@ impl URL {
             format!("{url}/")
         };
 
-        let (mut host, url) = url
+        let (host, url) = url
             .split_once('/')
             .ok_or_else(|| URLError::Split(url.to_string()))?;
         let path = format!("/{url}");
 
-        let mut port = None;
-        if let Some((new_host, port_str)) = host.split_once(':') {
-            host = new_host;
-            port = Some(port_str.parse::<u16>()?);
-        }
+        let (host, port) = if let Some((new_host, port_str)) = host.split_once(':') {
+            (new_host, port_str.parse::<u16>()?)
+        } else {
+            (host, scheme.default_port())
+        };
 
         Ok(Self {
             scheme,
@@ -101,11 +101,9 @@ impl URL {
         let read_buf = {
             let mut read_buf = String::new();
             let request = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", self.path, self.host);
-            let port = self.port.unwrap_or(self.scheme.default_port());
             match self.scheme {
                 Scheme::HTTP => {
-                    let mut stream = TcpStream::connect(format!("{}:{port}", self.host))?;
-
+                    let mut stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
                     stream.write_all(request.as_bytes())?;
                     stream.read_to_string(&mut read_buf)?;
                 }
@@ -115,10 +113,9 @@ impl URL {
                         self.host.clone().try_into()?,
                     )?;
 
-                    let mut socket = TcpStream::connect(format!("{}:{port}", self.host))?;
+                    let mut socket = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
                     let mut tls = rustls::Stream::new(&mut client, &mut socket);
                     tls.write_all(request.as_bytes())?;
-
                     tls.read_to_string(&mut read_buf)?;
                 }
             }
@@ -183,9 +180,28 @@ mod tests {
     #[test]
     fn parse_url() {
         let url = URL::init("http://example.org").unwrap();
-        assert_eq!(url.scheme, "http");
+        assert!(matches!(url.scheme, Scheme::HTTP));
         assert_eq!(url.host, "example.org");
         assert_eq!(url.path, "/");
+        assert_eq!(url.port, 80);
+    }
+
+    #[test]
+    fn parse_url_https() {
+        let url = URL::init("https://example.org").unwrap();
+        assert!(matches!(url.scheme, Scheme::HTTPS));
+        assert_eq!(url.host, "example.org");
+        assert_eq!(url.path, "/");
+        assert_eq!(url.port, 443);
+    }
+
+    #[test]
+    fn parse_url_custom_port() {
+        let url = URL::init("https://example.org:8000").unwrap();
+        assert!(matches!(url.scheme, Scheme::HTTPS));
+        assert_eq!(url.host, "example.org");
+        assert_eq!(url.path, "/");
+        assert_eq!(url.port, 8000);
     }
 
     #[test]
