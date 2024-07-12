@@ -83,7 +83,10 @@ impl Request {
     fn init(method: RequestMethod, url: URL) -> Self {
         Self {
             method,
-            headers: HashMap::from([("Host".to_string(), vec![url.host.clone()])]),
+            headers: HashMap::from([
+                ("Host".to_string(), vec![url.host.clone()]),
+                ("Connection".to_string(), vec!["close".to_string()]),
+            ]),
             body: None,
             url,
         }
@@ -94,7 +97,7 @@ impl Request {
     /// Note that this does not overwrite any existing headers!
     /// If a given Header already exists in this Request,
     /// the new value(s) will simply be appended to that Header.
-    fn add_headers(mut self, headers: &[(&str, &str)]) -> Self {
+    fn with_extra_headers(mut self, headers: &[(&str, &str)]) -> Self {
         for (header, value) in headers {
             if let Some(existing_values) = self.headers.get_mut(*header) {
                 existing_values.push(value.to_string());
@@ -222,7 +225,7 @@ pub struct URL {
 }
 
 impl URL {
-    pub fn init(url: &str) -> Result<Self> {
+    pub fn from_str(url: &str) -> Result<Self> {
         let (scheme, url) = url
             .split_once("://")
             .ok_or_else(|| URLError::Split(url.to_string()))?;
@@ -267,8 +270,10 @@ pub fn show(body: &str) {
     }
 }
 
-pub fn load(url: &URL) -> Result<()> {
-    let request = Request::init(RequestMethod::GET, url.clone());
+pub fn load(url: &str) -> Result<()> {
+    let url = URL::from_str(url)?;
+    let request = Request::init(RequestMethod::GET, url.clone())
+        .with_extra_headers(&[("User-Agent", "Octo")]);
     let response = request.make()?;
     show(
         response
@@ -285,7 +290,7 @@ mod tests {
 
     #[test]
     fn parse_url() {
-        let url = URL::init("http://example.org").unwrap();
+        let url = URL::from_str("http://example.org").unwrap();
         assert!(matches!(url.scheme, Scheme::HTTP));
         assert_eq!(url.host, "example.org");
         assert_eq!(url.path, "/");
@@ -294,7 +299,7 @@ mod tests {
 
     #[test]
     fn parse_url_https() {
-        let url = URL::init("https://example.org").unwrap();
+        let url = URL::from_str("https://example.org").unwrap();
         assert!(matches!(url.scheme, Scheme::HTTPS));
         assert_eq!(url.host, "example.org");
         assert_eq!(url.path, "/");
@@ -303,7 +308,7 @@ mod tests {
 
     #[test]
     fn parse_url_custom_port() {
-        let url = URL::init("https://example.org:8000").unwrap();
+        let url = URL::from_str("https://example.org:8000").unwrap();
         assert!(matches!(url.scheme, Scheme::HTTPS));
         assert_eq!(url.host, "example.org");
         assert_eq!(url.path, "/");
@@ -312,18 +317,11 @@ mod tests {
 
     #[test]
     fn load_url() {
-        let url = URL::init("http://example.org").unwrap();
-        load(&url).unwrap();
+        load("http://example.org").unwrap();
     }
 
     #[test]
     fn load_url_https() {
-        let url = URL::init("https://example.org").unwrap();
-        load(&url).unwrap();
+        load("https://example.org").unwrap();
     }
-
-    // #[test]
-    // fn send_connection_user_agent_headers() {
-    //     let url = URL::init("https://example.org").unwrap();
-    // }
 }
