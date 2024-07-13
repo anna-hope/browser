@@ -122,39 +122,6 @@ pub(crate) enum Url {
     Data(DataUrl),
 }
 
-impl Url {
-    pub(crate) fn scheme(&self) -> Scheme {
-        match self {
-            Self::Web(url) => url.scheme,
-            Self::File(url) => url.scheme,
-            Self::Data(url) => url.scheme,
-        }
-    }
-
-    pub(crate) fn path(&self) -> Option<&str> {
-        match self {
-            Self::Web(url) => Some(url.path.as_str()),
-            Self::File(url) => Some(url.path.as_str()),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn host(&self) -> Option<&str> {
-        match self {
-            Self::Web(url) => Some(url.host.as_str()),
-            Self::File(url) => Some(url.host.as_str()),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn port(&self) -> Option<u16> {
-        match self {
-            Self::Web(url) => Some(url.port),
-            _ => None,
-        }
-    }
-}
-
 impl FromStr for Url {
     type Err = UrlError;
 
@@ -414,6 +381,39 @@ impl FromStr for Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Url {
+        fn scheme(&self) -> Scheme {
+            match self {
+                Self::Web(url) => url.scheme,
+                Self::File(url) => url.scheme,
+                Self::Data(url) => url.scheme,
+            }
+        }
+
+        fn path(&self) -> Option<&str> {
+            match self {
+                Self::Web(url) => Some(url.path.as_str()),
+                Self::File(url) => Some(url.path.as_str()),
+                _ => None,
+            }
+        }
+
+        fn host(&self) -> Option<&str> {
+            match self {
+                Self::Web(url) => Some(url.host.as_str()),
+                Self::File(url) => Some(url.host.as_str()),
+                _ => None,
+            }
+        }
+
+        fn port(&self) -> Option<u16> {
+            match self {
+                Self::Web(url) => Some(url.port),
+                _ => None,
+            }
+        }
+    }
 
     #[test]
     fn parse_url() {
