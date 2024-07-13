@@ -2,19 +2,33 @@ mod request;
 
 use std::fs;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 
-pub fn show(body: &str) {
+fn parse_body(body: &str) -> Result<String> {
     let mut in_tag = false;
-    for c in body.chars() {
-        if c == '<' {
+    let mut current_entity = String::new();
+    let mut chars = body.chars();
+    let mut result = String::new();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            // This is an entity, so we'll consume the chars until we reach the end.
+            current_entity.extend(chars.by_ref().take_while(|c| *c != ';'));
+            let entity_char = match current_entity.as_str() {
+                "lt" => '<',
+                "gt" => '>',
+                _ => return Err(anyhow!("Unknown entity: {}", current_entity)),
+            };
+            result.push(entity_char);
+            current_entity.clear();
+        } else if c == '<' {
             in_tag = true;
         } else if c == '>' {
             in_tag = false;
         } else if !in_tag {
-            print!("{c}");
+            result.push(c);
         }
     }
+    Ok(result)
 }
 
 pub fn load(url: &str) -> Result<()> {
@@ -24,12 +38,13 @@ pub fn load(url: &str) -> Result<()> {
             let request = request::Request::init(request::RequestMethod::Get, url.clone())
                 .with_extra_headers(&[("User-Agent", "Octo")]);
             let response = request.make()?;
-            show(
+            let parsed_body = parse_body(
                 response
                     .body
                     .ok_or_else(|| anyhow::anyhow!("Empty response body"))?
                     .as_str(),
-            );
+            )?;
+            println!("{parsed_body}");
         }
         request::Url::File(url) => {
             let contents = fs::read(&url.path).context(url.path)?;
@@ -62,5 +77,12 @@ mod tests {
     fn load_file() {
         let project_root = env::current_dir().unwrap();
         load(format!("file://{}/LICENSE", project_root.to_string_lossy()).as_str()).unwrap();
+    }
+
+    #[test]
+    fn parse_entities() {
+        let example = "&lt;div&gt;";
+        let parsed = parse_body(example).unwrap();
+        assert_eq!(parsed, "<div>");
     }
 }
