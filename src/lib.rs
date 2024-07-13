@@ -24,7 +24,7 @@ lazy_static! {
 }
 
 #[derive(Error, Debug)]
-enum URLError {
+enum UrlError {
     #[error("error splitting the URL: `{0}`")]
     Split(String),
 
@@ -59,7 +59,7 @@ pub enum ResponseError {
 #[derive(Error, Debug)]
 pub enum BrowserError {
     #[error(transparent)]
-    URL(#[from] URLError),
+    Url(#[from] UrlError),
 
     #[error(transparent)]
     Request(#[from] RequestError),
@@ -70,30 +70,30 @@ pub enum BrowserError {
 
 #[derive(Debug, Copy, Clone)]
 enum Scheme {
-    HTTP,
-    HTTPS,
+    Http,
+    Https,
     File,
 }
 
 impl Scheme {
     fn default_port(&self) -> Option<u16> {
         match self {
-            Self::HTTP => Some(80),
-            Self::HTTPS => Some(443),
+            Self::Http => Some(80),
+            Self::Https => Some(443),
             _ => None,
         }
     }
 }
 
 impl FromStr for Scheme {
-    type Err = URLError;
+    type Err = UrlError;
 
-    fn from_str(s: &str) -> Result<Self, URLError> {
+    fn from_str(s: &str) -> Result<Self, UrlError> {
         match s {
-            "http" => Ok(Self::HTTP),
-            "https" => Ok(Self::HTTPS),
+            "http" => Ok(Self::Http),
+            "https" => Ok(Self::Https),
             "file" => Ok(Self::File),
-            _ => Err(URLError::UnknownScheme(s.to_string())),
+            _ => Err(UrlError::UnknownScheme(s.to_string())),
         }
     }
 }
@@ -110,20 +110,20 @@ impl Display for Scheme {
 }
 
 #[derive(Debug, Clone)]
-struct URL {
+struct Url {
     pub scheme: Scheme,
     pub path: String,
     pub host: String,
     pub port: Option<u16>,
 }
 
-impl FromStr for URL {
-    type Err = URLError;
+impl FromStr for Url {
+    type Err = UrlError;
 
-    fn from_str(url: &str) -> Result<Self, URLError> {
+    fn from_str(url: &str) -> Result<Self, UrlError> {
         let (scheme, url) = url
             .split_once("://")
-            .ok_or_else(|| URLError::Split(url.to_string()))?;
+            .ok_or_else(|| UrlError::Split(url.to_string()))?;
         let scheme = Scheme::from_str(scheme)?;
 
         let url = if url.contains('/') {
@@ -134,7 +134,7 @@ impl FromStr for URL {
 
         let (host, url) = url
             .split_once('/')
-            .ok_or_else(|| URLError::Split(url.to_string()))?;
+            .ok_or_else(|| UrlError::Split(url.to_string()))?;
         let path = format!("/{url}");
 
         let (host, port) = if let Some((new_host, port_str)) = host.split_once(':') {
@@ -154,13 +154,13 @@ impl FromStr for URL {
 
 #[derive(Debug, Copy, Clone)]
 pub enum RequestMethod {
-    GET,
+    Get,
 }
 
 impl Display for RequestMethod {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::GET => write!(f, "GET"),
+            Self::Get => write!(f, "GET"),
         }
     }
 }
@@ -170,11 +170,11 @@ struct Request {
     method: RequestMethod,
     headers: HashMap<String, Vec<String>>,
     body: Option<String>,
-    url: URL,
+    url: Url,
 }
 
 impl Request {
-    fn init(method: RequestMethod, url: URL) -> Self {
+    fn init(method: RequestMethod, url: Url) -> Self {
         Self {
             method,
             headers: HashMap::from([
@@ -212,7 +212,7 @@ impl Request {
         let read_buf = {
             let mut read_buf = String::new();
             match self.url.scheme {
-                Scheme::HTTP => {
+                Scheme::Http => {
                     let mut stream = TcpStream::connect(format!(
                         "{}:{}",
                         self.url.host,
@@ -221,7 +221,7 @@ impl Request {
                     stream.write_all(self.to_string().as_bytes())?;
                     stream.read_to_string(&mut read_buf)?;
                 }
-                Scheme::HTTPS => {
+                Scheme::Https => {
                     let mut client = rustls::ClientConnection::new(
                         CONFIG.clone(),
                         self.url.host.clone().try_into()?,
@@ -236,7 +236,7 @@ impl Request {
                     tls.write_all(self.to_string().as_bytes())?;
                     tls.read_to_string(&mut read_buf)?;
                 }
-                _ => return Err(URLError::InvalidScheme(self.url.scheme).into()),
+                _ => return Err(UrlError::InvalidScheme(self.url.scheme).into()),
             }
             read_buf
         };
@@ -286,7 +286,7 @@ impl FromStr for StatusLine {
 
 #[derive(Debug, Clone)]
 pub struct Response {
-    status_line: StatusLine,
+    pub status_line: StatusLine,
     pub headers: HashMap<String, String>,
     pub body: Option<String>,
 }
@@ -336,10 +336,10 @@ pub fn show(body: &str) {
 }
 
 pub fn load(url: &str) -> Result<()> {
-    let url = URL::from_str(url)?;
+    let url = Url::from_str(url)?;
     match url.scheme {
-        Scheme::HTTP | Scheme::HTTPS => {
-            let request = Request::init(RequestMethod::GET, url.clone())
+        Scheme::Http | Scheme::Https => {
+            let request = Request::init(RequestMethod::Get, url.clone())
                 .with_extra_headers(&[("User-Agent", "Octo")]);
             let response = request.make()?;
             show(
@@ -365,8 +365,8 @@ mod tests {
 
     #[test]
     fn parse_url() {
-        let url = URL::from_str("http://example.org").unwrap();
-        assert!(matches!(url.scheme, Scheme::HTTP));
+        let url = Url::from_str("http://example.org").unwrap();
+        assert!(matches!(url.scheme, Scheme::Http));
         assert_eq!(url.host, "example.org");
         assert_eq!(url.path, "/");
         assert_eq!(url.port, Some(80));
@@ -374,8 +374,8 @@ mod tests {
 
     #[test]
     fn parse_url_https() {
-        let url = URL::from_str("https://example.org").unwrap();
-        assert!(matches!(url.scheme, Scheme::HTTPS));
+        let url = Url::from_str("https://example.org").unwrap();
+        assert!(matches!(url.scheme, Scheme::Https));
         assert_eq!(url.host, "example.org");
         assert_eq!(url.path, "/");
         assert_eq!(url.port, Some(443));
@@ -383,8 +383,8 @@ mod tests {
 
     #[test]
     fn parse_url_custom_port() {
-        let url = URL::from_str("https://example.org:8000").unwrap();
-        assert!(matches!(url.scheme, Scheme::HTTPS));
+        let url = Url::from_str("https://example.org:8000").unwrap();
+        assert!(matches!(url.scheme, Scheme::Https));
         assert_eq!(url.host, "example.org");
         assert_eq!(url.path, "/");
         assert_eq!(url.port, Some(8000));
