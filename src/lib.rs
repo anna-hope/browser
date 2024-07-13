@@ -1,9 +1,12 @@
+use std::backtrace::Backtrace;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::num::ParseIntError;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -22,45 +25,76 @@ lazy_static! {
 }
 
 #[derive(Error, Debug)]
-pub enum URLError {
+enum URLError {
     #[error("error splitting the URL: `{0}`")]
     Split(String),
-
-    #[error("can't connect via TCP")]
-    ConnectionFailed(#[from] io::Error),
-
-    #[error("invalid TCP response: {0}")]
-    InvalidResponse(String),
 
     #[error("unknown URL scheme: {0}")]
     UnknownScheme(String),
 
     #[error("invalid scheme for an HTTP request: {0}")]
     InvalidScheme(Scheme),
+
+    #[error("failed to parse the port: {0}")]
+    InvalidPort(#[from] ParseIntError),
+}
+
+#[derive(Error, Debug)]
+enum RequestError {
+    #[error("can't connect via TCP")]
+    ConnectionFailed(#[from] io::Error),
+}
+
+#[derive(Error, Debug)]
+pub enum ResponseError {
+    #[error("missing status line: {0}")]
+    MissingStatusLine(String),
+
+    #[error("invalid status line: {0}")]
+    InvalidStatusLine(String),
+
+    #[error("failed to parse the status code: {0}")]
+    InvalidStatusCode(#[from] ParseIntError),
+}
+
+#[derive(Error, Debug)]
+pub enum BrowserError {
+    #[error(transparent)]
+    URL(#[from] URLError),
+
+    #[error(transparent)]
+    Request(#[from] RequestError),
+
+    #[error(transparent)]
+    Response(#[from] ResponseError),
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum Scheme {
+enum Scheme {
     HTTP,
     HTTPS,
     File,
 }
 
 impl Scheme {
-    fn from_str(scheme: &str) -> Result<Self, URLError> {
-        match scheme {
-            "http" => Ok(Self::HTTP),
-            "https" => Ok(Self::HTTPS),
-            "file" => Ok(Self::File),
-            _ => Err(URLError::UnknownScheme(scheme.to_string())),
-        }
-    }
-
     fn default_port(&self) -> Option<u16> {
         match self {
             Self::HTTP => Some(80),
             Self::HTTPS => Some(443),
             _ => None,
+        }
+    }
+}
+
+impl FromStr for Scheme {
+    type Err = URLError;
+
+    fn from_str(s: &str) -> Result<Self, URLError> {
+        match s {
+            "http" => Ok(Self::HTTP),
+            "https" => Ok(Self::HTTPS),
+            "file" => Ok(Self::File),
+            _ => Err(URLError::UnknownScheme(s.to_string())),
         }
     }
 }
@@ -77,15 +111,17 @@ impl Display for Scheme {
 }
 
 #[derive(Debug, Clone)]
-pub struct URL {
+struct URL {
     pub scheme: Scheme,
     pub path: String,
     pub host: String,
     pub port: Option<u16>,
 }
 
-impl URL {
-    pub fn from_str(url: &str) -> Result<Self> {
+impl FromStr for URL {
+    type Err = URLError;
+
+    fn from_str(url: &str) -> Result<Self, URLError> {
         let (scheme, url) = url
             .split_once("://")
             .ok_or_else(|| URLError::Split(url.to_string()))?;
@@ -131,11 +167,11 @@ impl Display for RequestMethod {
 }
 
 #[derive(Debug, Clone)]
-pub struct Request {
-    pub method: RequestMethod,
+struct Request {
+    method: RequestMethod,
     headers: HashMap<String, Vec<String>>,
-    pub body: Option<String>,
-    pub url: URL,
+    body: Option<String>,
+    url: URL,
 }
 
 impl Request {
@@ -205,7 +241,7 @@ impl Request {
             }
             read_buf
         };
-        Response::from_str(&read_buf)
+        Ok(Response::from_str(&read_buf)?)
     }
 }
 
@@ -224,18 +260,19 @@ impl Display for Request {
 
 #[derive(Debug, Clone)]
 pub struct StatusLine {
-    version: String,
-    status_code: u16,
-    explanation: String,
+    pub version: String,
+    pub status_code: u16,
+    pub explanation: String,
 }
 
-impl StatusLine {
-    fn from_str(string: &str) -> Result<Self> {
+impl FromStr for StatusLine {
+    type Err = ResponseError;
+
+    fn from_str(s: &str) -> Result<Self, ResponseError> {
         let (version, status, explanation) = {
-            let parts = string.splitn(3, ' ').collect::<Vec<_>>();
+            let parts = s.splitn(3, ' ').collect::<Vec<_>>();
             if parts.len() < 3 {
-                return Err(URLError::InvalidResponse(string.to_string()))
-                    .context(format!("Can't parse status_line parts: {string}"));
+                return Err(ResponseError::InvalidStatusLine(s.to_string()));
             }
             (parts[0], parts[1], parts[2])
         };
@@ -255,13 +292,14 @@ pub struct Response {
     pub body: Option<String>,
 }
 
-impl Response {
-    pub fn from_str(string: &str) -> Result<Self> {
+impl FromStr for Response {
+    type Err = ResponseError;
+
+    fn from_str(string: &str) -> Result<Self, ResponseError> {
         let mut lines = string.lines();
         let status_line = lines
             .next()
-            .ok_or_else(|| URLError::InvalidResponse(string.to_string()))
-            .context("Missing status_line")?;
+            .ok_or_else(|| ResponseError::MissingStatusLine(string.to_string()))?;
         let status_line = StatusLine::from_str(status_line)?;
 
         let headers: HashMap<_, _> = HashMap::from_iter(lines.by_ref().map_while(|line| {
