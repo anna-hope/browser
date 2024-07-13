@@ -77,6 +77,7 @@ pub(crate) enum Scheme {
     Http,
     Https,
     File,
+    Data,
 }
 
 impl Scheme {
@@ -114,11 +115,39 @@ impl Display for Scheme {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Url {
-    pub scheme: Scheme,
-    pub path: String,
-    pub host: String,
-    pub port: Option<u16>,
+pub(crate) enum Url {
+    WebUrl(WebUrl),
+    FileUrl(FileUrl),
+}
+
+impl Url {
+    pub(crate) fn scheme(&self) -> Scheme {
+        match self {
+            Self::WebUrl(url) => url.scheme,
+            Self::FileUrl(url) => url.scheme,
+        }
+    }
+
+    pub(crate) fn path(&self) -> Option<&str> {
+        match self {
+            Self::WebUrl(url) => Some(url.path.as_str()),
+            Self::FileUrl(url) => Some(url.path.as_str()),
+        }
+    }
+
+    pub(crate) fn host(&self) -> Option<&str> {
+        match self {
+            Self::WebUrl(url) => Some(url.host.as_str()),
+            Self::FileUrl(url) => Some(url.host.as_str()),
+        }
+    }
+
+    pub(crate) fn port(&self) -> Option<u16> {
+        match self {
+            Self::WebUrl(url) => Some(url.port),
+            _ => None,
+        }
+    }
 }
 
 impl FromStr for Url {
@@ -141,19 +170,44 @@ impl FromStr for Url {
             .ok_or_else(|| UrlError::Split(url.to_string()))?;
         let path = format!("/{url}");
 
-        let (host, port) = if let Some((new_host, port_str)) = host.split_once(':') {
-            (new_host, Some(port_str.parse::<u16>()?))
-        } else {
-            (host, scheme.default_port())
-        };
-
-        Ok(Self {
-            scheme,
-            host: host.to_string(),
-            path,
-            port,
-        })
+        match scheme {
+            Scheme::Http | Scheme::Https => {
+                let (host, port) = if let Some((new_host, port_str)) = host.split_once(':') {
+                    (new_host, port_str.parse::<u16>()?)
+                } else {
+                    // Http and Https are guaranteed to have a default port, so safe to unwrap.
+                    (host, scheme.default_port().unwrap())
+                };
+                Ok(Self::WebUrl(WebUrl {
+                    scheme,
+                    host: host.to_string(),
+                    path,
+                    port,
+                }))
+            }
+            Scheme::File => Ok(Self::FileUrl(FileUrl {
+                scheme,
+                host: host.to_string(),
+                path,
+            })),
+            Scheme::Data => todo!(),
+        }
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WebUrl {
+    pub scheme: Scheme,
+    pub path: String,
+    pub host: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FileUrl {
+    pub scheme: Scheme,
+    pub path: String,
+    pub host: String,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -174,11 +228,11 @@ pub(crate) struct Request {
     method: RequestMethod,
     headers: HashMap<String, Vec<String>>,
     body: Option<String>,
-    url: Url,
+    url: WebUrl,
 }
 
 impl Request {
-    pub(crate) fn init(method: RequestMethod, url: Url) -> Self {
+    pub(crate) fn init(method: RequestMethod, url: WebUrl) -> Self {
         Self {
             method,
             headers: HashMap::from([
@@ -217,11 +271,8 @@ impl Request {
             let mut read_buf = String::new();
             match self.url.scheme {
                 Scheme::Http => {
-                    let mut stream = TcpStream::connect(format!(
-                        "{}:{}",
-                        self.url.host,
-                        self.url.port.unwrap()
-                    ))?;
+                    let mut stream =
+                        TcpStream::connect(format!("{}:{}", self.url.host, self.url.port,))?;
                     stream.write_all(self.to_string().as_bytes())?;
                     stream.read_to_string(&mut read_buf)?;
                 }
@@ -231,11 +282,8 @@ impl Request {
                         self.url.host.clone().try_into()?,
                     )?;
 
-                    let mut stream = TcpStream::connect(format!(
-                        "{}:{}",
-                        self.url.host,
-                        self.url.port.unwrap()
-                    ))?;
+                    let mut stream =
+                        TcpStream::connect(format!("{}:{}", self.url.host, self.url.port,))?;
                     let mut tls = rustls::Stream::new(&mut client, &mut stream);
                     tls.write_all(self.to_string().as_bytes())?;
                     tls.read_to_string(&mut read_buf)?;
@@ -332,28 +380,28 @@ mod tests {
 
     #[test]
     fn parse_url() {
-        let url = Url::from_str("http://example.org").unwrap();
-        assert!(matches!(url.scheme, Scheme::Http));
-        assert_eq!(url.host, "example.org");
-        assert_eq!(url.path, "/");
-        assert_eq!(url.port, Some(80));
+        let url = "http://example.org".parse::<Url>().unwrap();
+        assert!(matches!(url.scheme(), Scheme::Http));
+        assert_eq!(url.host().unwrap(), "example.org");
+        assert_eq!(url.path().unwrap(), "/");
+        assert_eq!(url.port().unwrap(), 80);
     }
 
     #[test]
     fn parse_url_https() {
-        let url = Url::from_str("https://example.org").unwrap();
-        assert!(matches!(url.scheme, Scheme::Https));
-        assert_eq!(url.host, "example.org");
-        assert_eq!(url.path, "/");
-        assert_eq!(url.port, Some(443));
+        let url = "https://example.org".parse::<Url>().unwrap();
+        assert!(matches!(url.scheme(), Scheme::Https));
+        assert_eq!(url.host().unwrap(), "example.org");
+        assert_eq!(url.path().unwrap(), "/");
+        assert_eq!(url.port().unwrap(), 443);
     }
 
     #[test]
     fn parse_url_custom_port() {
-        let url = Url::from_str("https://example.org:8000").unwrap();
-        assert!(matches!(url.scheme, Scheme::Https));
-        assert_eq!(url.host, "example.org");
-        assert_eq!(url.path, "/");
-        assert_eq!(url.port, Some(8000));
+        let url = "https://example.org:8000".parse::<Url>().unwrap();
+        assert!(matches!(url.scheme(), Scheme::Https));
+        assert_eq!(url.host().unwrap(), "example.org");
+        assert_eq!(url.path().unwrap(), "/");
+        assert_eq!(url.port().unwrap(), 8000);
     }
 }

@@ -19,8 +19,8 @@ pub fn show(body: &str) {
 
 pub fn load(url: &str) -> Result<()> {
     let url = url.parse::<request::Url>()?;
-    match url.scheme {
-        request::Scheme::Http | request::Scheme::Https => {
+    match url {
+        request::Url::WebUrl(url) => {
             let request = request::Request::init(request::RequestMethod::Get, url.clone())
                 .with_extra_headers(&[("User-Agent", "Octo")]);
             let response = request.make()?;
@@ -31,7 +31,7 @@ pub fn load(url: &str) -> Result<()> {
                     .as_str(),
             );
         }
-        request::Scheme::File => {
+        request::Url::FileUrl(url) => {
             let contents = fs::read(&url.path).context(url.path)?;
             let contents = String::from_utf8_lossy(&contents);
             println!("{contents}");
