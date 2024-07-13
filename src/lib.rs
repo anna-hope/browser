@@ -20,7 +20,7 @@ pub fn show(body: &str) {
 pub fn load(url: &str) -> Result<()> {
     let url = url.parse::<request::Url>()?;
     match url {
-        request::Url::WebUrl(url) => {
+        request::Url::Web(url) => {
             let request = request::Request::init(request::RequestMethod::Get, url.clone())
                 .with_extra_headers(&[("User-Agent", "Octo")]);
             let response = request.make()?;
@@ -31,10 +31,13 @@ pub fn load(url: &str) -> Result<()> {
                     .as_str(),
             );
         }
-        request::Url::FileUrl(url) => {
+        request::Url::File(url) => {
             let contents = fs::read(&url.path).context(url.path)?;
             let contents = String::from_utf8_lossy(&contents);
             println!("{contents}");
+        }
+        request::Url::Data(url) => {
+            println!("{}", url.data);
         }
     }
     Ok(())

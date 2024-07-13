@@ -93,11 +93,12 @@ impl Scheme {
 impl FromStr for Scheme {
     type Err = UrlError;
 
-    fn from_str(s: &str) -> Result<Self, UrlError> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "http" => Ok(Self::Http),
             "https" => Ok(Self::Https),
             "file" => Ok(Self::File),
+            "data" => Ok(Self::Data),
             _ => Err(UrlError::UnknownScheme(s.to_string())),
         }
     }
@@ -116,35 +117,39 @@ impl Display for Scheme {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Url {
-    WebUrl(WebUrl),
-    FileUrl(FileUrl),
+    Web(WebUrl),
+    File(FileUrl),
+    Data(DataUrl),
 }
 
 impl Url {
     pub(crate) fn scheme(&self) -> Scheme {
         match self {
-            Self::WebUrl(url) => url.scheme,
-            Self::FileUrl(url) => url.scheme,
+            Self::Web(url) => url.scheme,
+            Self::File(url) => url.scheme,
+            Self::Data(url) => url.scheme,
         }
     }
 
     pub(crate) fn path(&self) -> Option<&str> {
         match self {
-            Self::WebUrl(url) => Some(url.path.as_str()),
-            Self::FileUrl(url) => Some(url.path.as_str()),
+            Self::Web(url) => Some(url.path.as_str()),
+            Self::File(url) => Some(url.path.as_str()),
+            _ => None,
         }
     }
 
     pub(crate) fn host(&self) -> Option<&str> {
         match self {
-            Self::WebUrl(url) => Some(url.host.as_str()),
-            Self::FileUrl(url) => Some(url.host.as_str()),
+            Self::Web(url) => Some(url.host.as_str()),
+            Self::File(url) => Some(url.host.as_str()),
+            _ => None,
         }
     }
 
     pub(crate) fn port(&self) -> Option<u16> {
         match self {
-            Self::WebUrl(url) => Some(url.port),
+            Self::Web(url) => Some(url.port),
             _ => None,
         }
     }
@@ -153,11 +158,17 @@ impl Url {
 impl FromStr for Url {
     type Err = UrlError;
 
-    fn from_str(url: &str) -> Result<Self, UrlError> {
+    fn from_str(url: &str) -> Result<Self, Self::Err> {
         let (scheme, url) = url
-            .split_once("://")
+            .split_once(':')
             .ok_or_else(|| UrlError::Split(url.to_string()))?;
         let scheme = Scheme::from_str(scheme)?;
+        if matches!(scheme, Scheme::Data) {
+            return Ok(Self::Data(url.parse::<DataUrl>()?));
+        }
+        let url = url
+            .strip_prefix("//")
+            .ok_or_else(|| UrlError::Split(url.to_string()))?;
 
         let url = if url.contains('/') {
             url.to_string()
@@ -178,19 +189,20 @@ impl FromStr for Url {
                     // Http and Https are guaranteed to have a default port, so safe to unwrap.
                     (host, scheme.default_port().unwrap())
                 };
-                Ok(Self::WebUrl(WebUrl {
+                Ok(Self::Web(WebUrl {
                     scheme,
                     host: host.to_string(),
                     path,
                     port,
                 }))
             }
-            Scheme::File => Ok(Self::FileUrl(FileUrl {
+            Scheme::File => Ok(Self::File(FileUrl {
                 scheme,
                 host: host.to_string(),
                 path,
             })),
-            Scheme::Data => todo!(),
+            // We handled this above, so this will never happen.
+            Scheme::Data => unreachable!(),
         }
     }
 }
@@ -208,6 +220,31 @@ pub(crate) struct FileUrl {
     pub scheme: Scheme,
     pub path: String,
     pub host: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DataUrl {
+    pub scheme: Scheme,
+    // TODO: Use enumerated mimetypes instead of String
+    pub mimetype: String,
+    // TODO: Add base64 bool field
+    pub data: String,
+}
+
+impl FromStr for DataUrl {
+    type Err = UrlError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // TODO: Currently doesn't handle parsing the optional base64 token.
+        let (mimetype, data) = s
+            .split_once(',')
+            .ok_or_else(|| UrlError::Split(s.to_string()))?;
+        Ok(Self {
+            scheme: Scheme::Data,
+            mimetype: mimetype.to_string(),
+            data: data.to_string(),
+        })
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -403,5 +440,18 @@ mod tests {
         assert_eq!(url.host().unwrap(), "example.org");
         assert_eq!(url.path().unwrap(), "/");
         assert_eq!(url.port().unwrap(), 8000);
+    }
+
+    #[test]
+    fn parse_data_url() {
+        let url = "data:text/html,Hello world!".parse::<Url>().unwrap();
+        match url {
+            Url::Data(url) => {
+                assert!(matches!(url.scheme, Scheme::Data));
+                assert_eq!(url.mimetype, "text/html");
+                assert_eq!(url.data, "Hello world!");
+            }
+            _ => panic!("Expected a DataUrl, got {url:?}"),
+        }
     }
 }
