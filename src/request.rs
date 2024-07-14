@@ -12,6 +12,8 @@ use anyhow::Result;
 use lazy_static::lazy_static;
 use thiserror::Error;
 
+const USER_AGENT: &str = "Octo";
+
 lazy_static! {
     static ref ROOT_STORE: Arc<rustls::RootCertStore> = Arc::new(rustls::RootCertStore::from_iter(
         webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
@@ -31,15 +33,18 @@ pub(crate) enum UrlError {
     #[error("unknown URL scheme: {0}")]
     UnknownScheme(String),
 
-    #[error("invalid scheme for an HTTP request: {0}")]
-    InvalidScheme(Scheme),
-
     #[error("failed to parse the port: {0}")]
     InvalidPort(#[from] ParseIntError),
+
+    #[error("Invalid url: {0}")]
+    InvalidUrl(String),
 }
 
 #[derive(Error, Debug)]
 pub(crate) enum RequestError {
+    #[error("invalid scheme for a web URL: {0}")]
+    InvalidScheme(Scheme),
+
     #[error("can't connect via TCP")]
     ConnectionFailed(#[from] io::Error),
 }
@@ -78,6 +83,7 @@ pub(crate) enum Scheme {
     Https,
     File,
     Data,
+    ViewSource,
 }
 
 impl Scheme {
@@ -99,6 +105,7 @@ impl FromStr for Scheme {
             "https" => Ok(Self::Https),
             "file" => Ok(Self::File),
             "data" => Ok(Self::Data),
+            "view-source" => Ok(Self::ViewSource),
             _ => Err(UrlError::UnknownScheme(s.to_string())),
         }
     }
@@ -106,12 +113,19 @@ impl FromStr for Scheme {
 
 impl Display for Scheme {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        // This feels like I am abusing the Debug representation, but it works.
-        let variant_name = format!("{self:?}")
-            .strip_prefix("Scheme::")
-            .unwrap()
-            .to_lowercase();
-        write!(f, "{variant_name}")
+        let scheme_string = match self {
+            // I could use some fancy PascalCase to kebab-case conversion logic,
+            // but it's probably not worth it for this one-off case.
+            Self::ViewSource => "view-source".to_string(),
+            _ => {
+                // This feels like I am abusing the Debug representation, but it works.
+                format!("{self:?}")
+                    .strip_prefix("Scheme::")
+                    .unwrap()
+                    .to_lowercase()
+            }
+        };
+        write!(f, "{scheme_string}")
     }
 }
 
@@ -120,22 +134,34 @@ pub(crate) enum Url {
     Web(WebUrl),
     File(FileUrl),
     Data(DataUrl),
+    ViewSource(WebUrl),
 }
 
 impl FromStr for Url {
     type Err = UrlError;
 
     fn from_str(url: &str) -> Result<Self, Self::Err> {
-        let (scheme, url) = url
+        let (scheme, url_rest) = url
             .split_once(':')
             .ok_or_else(|| UrlError::Split(url.to_string()))?;
-        let scheme = Scheme::from_str(scheme)?;
+        let scheme = scheme.parse::<Scheme>()?;
+
         if matches!(scheme, Scheme::Data) {
-            return Ok(Self::Data(url.parse::<DataUrl>()?));
+            return Ok(Self::Data(url_rest.parse::<DataUrl>()?));
+        } else if matches!(scheme, Scheme::ViewSource) {
+            // Parse the URL that view-source points to.
+            return match url_rest.parse::<Self>()? {
+                Self::Web(url) => Ok(Self::ViewSource(url)),
+                _ => Err(UrlError::InvalidUrl(format!(
+                    "Invalid resource URL for {scheme}: {}",
+                    url
+                ))),
+            };
         }
-        let url = url
+
+        let url = url_rest
             .strip_prefix("//")
-            .ok_or_else(|| UrlError::Split(url.to_string()))?;
+            .ok_or_else(|| UrlError::Split(url_rest.to_string()))?;
 
         let url = if url.contains('/') {
             url.to_string()
@@ -169,7 +195,7 @@ impl FromStr for Url {
                 path,
             })),
             // We handled this above, so this will never happen.
-            Scheme::Data => unreachable!(),
+            Scheme::Data | Scheme::ViewSource => unreachable!(),
         }
     }
 }
@@ -232,6 +258,7 @@ pub(crate) struct Request {
     method: RequestMethod,
     headers: HashMap<String, Vec<String>>,
     body: Option<String>,
+    // TODO: Switch to &WebUrl to avoid taking ownership/cloning?
     url: WebUrl,
 }
 
@@ -292,11 +319,20 @@ impl Request {
                     tls.write_all(self.to_string().as_bytes())?;
                     tls.read_to_string(&mut read_buf)?;
                 }
-                _ => return Err(UrlError::InvalidScheme(self.url.scheme).into()),
+                _ => return Err(RequestError::InvalidScheme(self.url.scheme).into()),
             }
             read_buf
         };
         Ok(Response::from_str(&read_buf)?)
+    }
+
+    /// Convenience method to make a GET request
+    /// to the given URL with the defaylt `User-Agent`
+    /// and return the resulting `Response` or error.
+    pub(crate) fn get(url: &WebUrl) -> Result<Response> {
+        let request = Self::init(RequestMethod::Get, url.clone())
+            .with_extra_headers(&[("User-Agent", USER_AGENT)]);
+        request.make()
     }
 }
 
@@ -388,6 +424,7 @@ mod tests {
                 Self::Web(url) => url.scheme,
                 Self::File(url) => url.scheme,
                 Self::Data(url) => url.scheme,
+                Self::ViewSource(_) => Scheme::ViewSource,
             }
         }
 
@@ -452,6 +489,20 @@ mod tests {
                 assert_eq!(url.data, "Hello world!");
             }
             _ => panic!("Expected a DataUrl, got {url:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_view_source_url() {
+        let url = "view-source:http://example.org/".parse::<Url>().unwrap();
+        match url {
+            Url::ViewSource(url) => {
+                assert!(matches!(url.scheme, Scheme::Http));
+                assert_eq!(url.host, "example.org");
+                assert_eq!(url.path, "/");
+                assert_eq!(url.port, 80);
+            }
+            _ => panic!("Expected a ViewSource url, got {url:?}"),
         }
     }
 }

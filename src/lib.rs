@@ -4,7 +4,7 @@ use std::fs;
 
 use anyhow::{anyhow, Context, Result};
 
-fn parse_body(body: &str) -> Result<String> {
+fn parse_body(body: &str, render: bool) -> Result<String> {
     let mut in_tag = false;
     let mut current_entity = String::new();
     let mut chars = body.chars();
@@ -20,9 +20,9 @@ fn parse_body(body: &str) -> Result<String> {
             };
             result.push(entity_char);
             current_entity.clear();
-        } else if c == '<' {
+        } else if c == '<' && render {
             in_tag = true;
-        } else if c == '>' {
+        } else if c == '>' && render {
             in_tag = false;
         } else if !in_tag {
             result.push(c);
@@ -35,14 +35,13 @@ pub fn load(url: &str) -> Result<()> {
     let url = url.parse::<request::Url>()?;
     match url {
         request::Url::Web(url) => {
-            let request = request::Request::init(request::RequestMethod::Get, url.clone())
-                .with_extra_headers(&[("User-Agent", "Octo")]);
-            let response = request.make()?;
+            let response = request::Request::get(&url)?;
             let parsed_body = parse_body(
                 response
                     .body
-                    .ok_or_else(|| anyhow::anyhow!("Empty response body"))?
+                    .ok_or_else(|| anyhow!("Empty response body"))?
                     .as_str(),
+                true,
             )?;
             println!("{parsed_body}");
         }
@@ -53,6 +52,17 @@ pub fn load(url: &str) -> Result<()> {
         }
         request::Url::Data(url) => {
             println!("{}", url.data);
+        }
+        request::Url::ViewSource(url) => {
+            let response = request::Request::get(&url)?;
+            let parsed_body = parse_body(
+                response
+                    .body
+                    .ok_or_else(|| anyhow!("Empty response body"))?
+                    .as_str(),
+                false,
+            )?;
+            println!("{parsed_body}");
         }
     }
     Ok(())
@@ -82,7 +92,12 @@ mod tests {
     #[test]
     fn parse_entities() {
         let example = "&lt;div&gt;";
-        let parsed = parse_body(example).unwrap();
+        let parsed = parse_body(example, true).unwrap();
         assert_eq!(parsed, "<div>");
+    }
+
+    #[test]
+    fn load_view_source() {
+        load("view-source:http://example.org/").unwrap();
     }
 }
