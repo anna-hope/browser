@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::{Display, Formatter};
 use std::io;
-use std::io::{Read, Write};
-use std::net::{Shutdown, TcpStream};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -85,7 +85,7 @@ impl Display for RequestMethod {
 #[derive(Debug)]
 enum GenericTcpStream {
     Insecure(TcpStream),
-    Secure(Box<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>),
+    Secure(rustls::StreamOwned<rustls::ClientConnection, TcpStream>),
 }
 
 impl GenericTcpStream {
@@ -98,46 +98,7 @@ impl GenericTcpStream {
         let stream = TcpStream::connect(format!("{}:{}", url.host, url.port))?;
         let client = rustls::ClientConnection::new(CONFIG.clone(), url.host.clone().try_into()?)?;
         let tls = rustls::StreamOwned::new(client, stream);
-        Ok(Self::Secure(Box::new(tls)))
-    }
-
-    fn shutdown(&self, how: Shutdown) -> io::Result<()> {
-        match self {
-            Self::Insecure(stream) => stream.shutdown(how),
-            Self::Secure(stream) => {
-                let socket = stream.get_ref();
-                socket.shutdown(how)
-            }
-        }
-    }
-
-    fn send(&mut self, request_data: &[u8], keep_alive: bool) -> Result<Response> {
-        self.write_all(request_data)?;
-
-        if keep_alive {
-            let mut response = Response::new_keep_alive(self)?;
-            let content_length = response
-                .headers
-                .get("content-length")
-                .map(|s| s.parse::<usize>())
-                .transpose()?
-                .unwrap_or(0);
-
-            let mut body_buf = Vec::with_capacity(content_length);
-            self.read_exact(&mut body_buf)?;
-            let body = String::from_utf8_lossy(&body_buf).to_string();
-
-            if !body.is_empty() {
-                response.body = Some(body);
-            }
-
-            Ok(response)
-        } else {
-            let mut response_data = String::new();
-            self.read_to_string(&mut response_data)?;
-            // self.shutdown(Shutdown::Both)?;
-            Ok(response_data.parse::<Response>()?)
-        }
+        Ok(Self::Secure(tls))
     }
 }
 
@@ -254,9 +215,15 @@ impl Request {
                 GenericTcpStream::connect_secure(&self.url)
             }
         })?;
+        stream.write_all(self_string.as_bytes())?;
 
-        let response = stream.send(self_string.as_bytes(), self.keep_alive)?;
-        Ok(response)
+        if self.keep_alive {
+            Ok(Response::from_stream(stream)?)
+        } else {
+            let mut response_data = String::new();
+            stream.read_to_string(&mut response_data)?;
+            Ok(response_data.parse::<Response>()?)
+        }
     }
 }
 
@@ -319,44 +286,55 @@ pub(crate) struct Response {
 }
 
 impl Response {
-    fn new_keep_alive(stream: &mut GenericTcpStream) -> Result<Self> {
+    fn from_stream(stream: &mut GenericTcpStream) -> Result<Self> {
         // TODO: Use io::BufReader to increase efficiency?
+        let mut reader = BufReader::new(stream);
         let mut status_line = String::new();
-        // Parse the bytes into the status line and then headers
-        // and then stop reading from the stream.
-        while let Some(Ok(byte)) = stream.bytes().next() {
-            let c = char::from(byte);
-            // TODO: Don't include \r so we don't have to call trim() on the string
-            if c == '\n' {
-                break;
-            }
-            status_line.push(c);
-        }
-        let status_line = status_line.trim().parse::<StatusLine>()?;
+        reader.read_line(&mut status_line)?;
+        let status_line = status_line.parse::<StatusLine>()?;
 
         // TODO: Support multiple header values for the same header key
         let mut headers = HashMap::new();
         let mut current_line = String::new();
-        while let Some(Ok(byte)) = stream.bytes().next() {
-            let c = char::from(byte);
-            current_line.push(c);
+
+        loop {
+            reader.read_line(&mut current_line)?;
             if current_line.as_str() == "\r\n" {
                 break;
             }
 
-            if c == '\n' {
-                let (header, value) = current_line
-                    .split_once(':')
-                    .ok_or_else(|| ResponseError::Headers(current_line.clone()))?;
-                headers.insert(header.to_lowercase(), value.trim().to_string());
-                current_line.clear();
-            }
+            let (header, value) = current_line
+                .split_once(':')
+                .ok_or_else(|| ResponseError::Headers(current_line.clone()))?;
+            headers.insert(header.to_lowercase(), value.trim().to_string());
+            current_line.clear();
         }
+
+        let content_length = headers
+            .get("content-length")
+            .map(|s| s.parse::<usize>())
+            .transpose()?
+            .unwrap_or(0);
+
+        let mut body_buf = String::with_capacity(content_length);
+        let mut bytes_read = 0;
+        while bytes_read < content_length {
+            let new_bytes_read = reader.read_line(&mut body_buf)?;
+            if new_bytes_read == 0 {
+                break;
+            }
+            bytes_read += new_bytes_read;
+        }
+        let body = if body_buf.is_empty() {
+            None
+        } else {
+            Some(body_buf)
+        };
 
         Ok(Self {
             status_line,
             headers,
-            body: None,
+            body,
         })
     }
 }
@@ -364,30 +342,32 @@ impl Response {
 impl FromStr for Response {
     type Err = ResponseError;
 
-    fn from_str(string: &str) -> Result<Self, ResponseError> {
-        let mut lines = string.lines();
+    fn from_str(s: &str) -> Result<Self, ResponseError> {
+        let mut lines = s.lines();
         let status_line = lines
             .next()
-            .ok_or_else(|| ResponseError::MissingStatusLine(string.to_string()))?;
+            .ok_or_else(|| ResponseError::MissingStatusLine(s.to_string()))?;
         let status_line = StatusLine::from_str(status_line)?;
 
         let headers: HashMap<_, _> = HashMap::from_iter(lines.by_ref().map_while(|line| {
-            if line == r"\r\n" {
-                None
-            } else {
-                let (header, value) = line.split_once(':')?;
-                Some((header.to_lowercase(), value.trim().to_string()))
-            }
+            let (header, value) = line.split_once(':')?;
+            Some((header.to_lowercase(), value.to_string()))
         }));
 
         assert!(!headers.contains_key("transfer-encoding"));
         assert!(!headers.contains_key("content-encoding"));
 
-        let content = String::from_iter(lines);
+        let mut body = String::with_capacity(s.len());
+
+        for line in lines {
+            body.push_str(line);
+            body.push('\n');
+        }
+
         Ok(Self {
             status_line,
             headers,
-            body: Some(content),
+            body: Some(body),
         })
     }
 }
@@ -419,6 +399,7 @@ mod tests {
 
         let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
         let first_response = request.make().unwrap();
+        assert!(first_response.body.is_some());
         let second_response = request.make().unwrap();
         assert_eq!(first_response, second_response);
 
