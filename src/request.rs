@@ -394,8 +394,23 @@ mod tests {
     }
 
     #[test]
-    fn test_keep_alive() {
+    fn keep_alive() {
         let url = "http://example.com".parse::<Url>().unwrap();
+
+        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
+        let first_response = request.make().unwrap();
+        assert!(first_response.body.is_some());
+        let second_response = request.make().unwrap();
+        assert_eq!(first_response, second_response);
+
+        let one_off_response = Request::get(url.as_web_url()).unwrap();
+        assert_eq!(first_response.body, one_off_response.body);
+        assert_eq!(second_response.body, one_off_response.body);
+    }
+
+    #[test]
+    fn keep_alive_https() {
+        let url = "https://example.com".parse::<Url>().unwrap();
 
         let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
         let first_response = request.make().unwrap();
