@@ -422,4 +422,49 @@ mod tests {
         assert_eq!(first_response.body, one_off_response.body);
         assert_eq!(second_response.body, one_off_response.body);
     }
+
+    #[test]
+    fn redirect() {
+        let url = "https://browser.engineering/redirect"
+            .parse::<Url>()
+            .unwrap();
+        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
+        let response_redirect = request.make().unwrap();
+
+        let url_no_redirect = "https://browser.engineering/http.html"
+            .parse::<Url>()
+            .unwrap();
+        let response_no_redirect = Request::get(url_no_redirect.as_web_url()).unwrap();
+        assert_eq!(response_redirect.body, response_no_redirect.body);
+    }
+
+    #[test]
+    fn redirect_2() {
+        let url = "https://browser.engineering/redirect2"
+            .parse::<Url>()
+            .unwrap();
+        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
+        let response_redirect = request.make().unwrap();
+
+        let url_no_redirect = "https://browser.engineering/http.html"
+            .parse::<Url>()
+            .unwrap();
+        let response_no_redirect = Request::get(url_no_redirect.as_web_url()).unwrap();
+        assert_eq!(response_redirect.body, response_no_redirect.body);
+    }
+
+    #[test]
+    fn redirect_3() {
+        let url = "https://browser.engineering/redirect3"
+            .parse::<Url>()
+            .unwrap();
+        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
+        let response_redirect = request.make().unwrap();
+
+        let url_no_redirect = "https://browser.engineering/http.html"
+            .parse::<Url>()
+            .unwrap();
+        let response_no_redirect = Request::get(url_no_redirect.as_web_url()).unwrap();
+        assert_eq!(response_redirect.body, response_no_redirect.body);
+    }
 }
