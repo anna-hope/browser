@@ -182,8 +182,8 @@ impl FromStr for DataUrl {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::url::{Scheme, Url};
+pub(crate) mod tests {
+    use super::*;
 
     impl Url {
         fn scheme(&self) -> Scheme {
@@ -215,6 +215,13 @@ mod tests {
             match self {
                 Self::Web(url) => Some(url.port),
                 _ => None,
+            }
+        }
+
+        pub(crate) fn as_web_url(&self) -> &WebUrl {
+            match self {
+                Self::Web(url) => url,
+                _ => panic!("Not a WebUrl: {self:?}"),
             }
         }
     }

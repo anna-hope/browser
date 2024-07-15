@@ -85,7 +85,7 @@ impl Display for RequestMethod {
 #[derive(Debug)]
 enum GenericTcpStream {
     Insecure(TcpStream),
-    Secure(rustls::StreamOwned<rustls::ClientConnection, TcpStream>),
+    Secure(Box<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>),
 }
 
 impl GenericTcpStream {
@@ -98,7 +98,7 @@ impl GenericTcpStream {
         let stream = TcpStream::connect(format!("{}:{}", url.host, url.port))?;
         let client = rustls::ClientConnection::new(CONFIG.clone(), url.host.clone().try_into()?)?;
         let tls = rustls::StreamOwned::new(client, stream);
-        Ok(Self::Secure(tls))
+        Ok(Self::Secure(Box::new(tls)))
     }
 }
 
@@ -156,24 +156,20 @@ impl ReusableTcpStream {
 pub(crate) struct Request {
     method: RequestMethod,
     headers: HashMap<String, Vec<String>>,
-    body: Option<String>,
     // TODO: Switch to &WebUrl to avoid taking ownership/cloning?
-    url: WebUrl,
     stream: ReusableTcpStream,
     keep_alive: bool,
 }
 
 impl Request {
-    pub(crate) fn init(method: RequestMethod, url: WebUrl, keep_alive: bool) -> Self {
+    pub(crate) fn init(method: RequestMethod, host: &str, keep_alive: bool) -> Self {
         let connection_value = if keep_alive { "keep-alive" } else { "close" };
         Self {
             method,
             headers: HashMap::from([
-                ("Host".to_string(), vec![url.host.clone()]),
+                ("Host".to_string(), vec![host.to_string()]),
                 ("Connection".to_string(), vec![connection_value.to_string()]),
             ]),
-            body: None,
-            url,
             stream: ReusableTcpStream::new(),
             keep_alive,
         }
@@ -196,23 +192,30 @@ impl Request {
         self
     }
 
-    pub(crate) fn with_body(mut self, body: &str) -> Self {
-        self.body = Some(body.to_string());
-        self
+    fn make_string(&self, url: &WebUrl, _body: Option<&str>) -> String {
+        let mut string = format!("{} {} HTTP/1.1\r\n", self.method, url.path);
+        for (header, values) in self.headers.iter() {
+            for value in values {
+                string.push_str(format!("{header}: {value}\r\n").as_str());
+            }
+        }
+        // TODO add body
+        string.push_str("\r\n");
+        string
     }
 
-    pub(crate) fn make(&mut self) -> Result<Response> {
-        if !matches!(self.url.scheme, Scheme::Http) && !matches!(self.url.scheme, Scheme::Https) {
-            return Err(RequestError::InvalidScheme(self.url.scheme).into());
+    pub(crate) fn make(&mut self, url: &WebUrl, body: Option<&str>) -> Result<Response> {
+        if !matches!(url.scheme, Scheme::Http) && !matches!(url.scheme, Scheme::Https) {
+            return Err(RequestError::InvalidScheme(url.scheme).into());
         }
-        let self_string = self.to_string();
+        let self_string = self.make_string(url, body);
 
         let stream = self.stream.get_mut_or_try_init(|| {
-            if matches!(self.url.scheme, Scheme::Http) {
-                GenericTcpStream::connect_insecure(&self.url)
+            if matches!(url.scheme, Scheme::Http) {
+                GenericTcpStream::connect_insecure(url)
             } else {
                 // HTTPS
-                GenericTcpStream::connect_secure(&self.url)
+                GenericTcpStream::connect_secure(url)
             }
         })?;
         stream.write_all(self_string.as_bytes())?;
@@ -232,22 +235,9 @@ impl Request {
     /// to the given URL with the defaylt `User-Agent`
     /// and return the resulting `Response` or error.
     pub(crate) fn get(url: &WebUrl) -> Result<Response> {
-        let mut request = Self::init(RequestMethod::Get, url.clone(), false)
+        let mut request = Self::init(RequestMethod::Get, &url.host, false)
             .with_extra_headers(&[("User-Agent", USER_AGENT)]);
-        request.make()
-    }
-}
-
-impl Display for Request {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut string = format!("{} {} HTTP/1.1\r\n", self.method, self.url.path);
-        for (header, values) in self.headers.iter() {
-            for value in values {
-                string.push_str(format!("{header}: {value}\r\n").as_str());
-            }
-        }
-        // TODO add body
-        write!(f, "{string}\r\n")
+        request.make(url, None)
     }
 }
 
@@ -286,8 +276,7 @@ pub(crate) struct Response {
 }
 
 impl Response {
-    fn from_stream(stream: &mut GenericTcpStream) -> Result<Self> {
-        // TODO: Use io::BufReader to increase efficiency?
+    fn from_stream(stream: &mut impl Read) -> Result<Self> {
         let mut reader = BufReader::new(stream);
         let mut status_line = String::new();
         reader.read_line(&mut status_line)?;
@@ -377,15 +366,6 @@ mod tests {
     use super::*;
     use crate::url::Url;
 
-    impl Url {
-        fn as_web_url(&self) -> &WebUrl {
-            match self {
-                Self::Web(url) => url,
-                _ => panic!("Not a WebUrl: {self:?}"),
-            }
-        }
-    }
-
     #[test]
     fn close() {
         let url = "http://example.com".parse::<Url>().unwrap();
@@ -393,78 +373,28 @@ mod tests {
         assert!(response.body.is_some());
     }
 
+    fn test_url_keepalive(url: &str) {
+        let url = url.parse::<Url>().unwrap();
+        let url = url.as_web_url();
+
+        let mut request = Request::init(RequestMethod::Get, &url.host, true);
+        let first_response = request.make(url, None).unwrap();
+        assert!(first_response.body.is_some());
+        let second_response = request.make(url, None).unwrap();
+        assert_eq!(first_response, second_response);
+
+        let one_off_response = Request::get(url).unwrap();
+        assert_eq!(first_response.body, one_off_response.body);
+        assert_eq!(second_response.body, one_off_response.body);
+    }
+
     #[test]
     fn keep_alive() {
-        let url = "http://example.com".parse::<Url>().unwrap();
-
-        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
-        let first_response = request.make().unwrap();
-        assert!(first_response.body.is_some());
-        let second_response = request.make().unwrap();
-        assert_eq!(first_response, second_response);
-
-        let one_off_response = Request::get(url.as_web_url()).unwrap();
-        assert_eq!(first_response.body, one_off_response.body);
-        assert_eq!(second_response.body, one_off_response.body);
+        test_url_keepalive("http://example.com");
     }
 
     #[test]
-    fn keep_alive_https() {
-        let url = "https://example.com".parse::<Url>().unwrap();
-
-        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
-        let first_response = request.make().unwrap();
-        assert!(first_response.body.is_some());
-        let second_response = request.make().unwrap();
-        assert_eq!(first_response, second_response);
-
-        let one_off_response = Request::get(url.as_web_url()).unwrap();
-        assert_eq!(first_response.body, one_off_response.body);
-        assert_eq!(second_response.body, one_off_response.body);
-    }
-
-    #[test]
-    fn redirect() {
-        let url = "https://browser.engineering/redirect"
-            .parse::<Url>()
-            .unwrap();
-        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
-        let response_redirect = request.make().unwrap();
-
-        let url_no_redirect = "https://browser.engineering/http.html"
-            .parse::<Url>()
-            .unwrap();
-        let response_no_redirect = Request::get(url_no_redirect.as_web_url()).unwrap();
-        assert_eq!(response_redirect.body, response_no_redirect.body);
-    }
-
-    #[test]
-    fn redirect_2() {
-        let url = "https://browser.engineering/redirect2"
-            .parse::<Url>()
-            .unwrap();
-        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
-        let response_redirect = request.make().unwrap();
-
-        let url_no_redirect = "https://browser.engineering/http.html"
-            .parse::<Url>()
-            .unwrap();
-        let response_no_redirect = Request::get(url_no_redirect.as_web_url()).unwrap();
-        assert_eq!(response_redirect.body, response_no_redirect.body);
-    }
-
-    #[test]
-    fn redirect_3() {
-        let url = "https://browser.engineering/redirect3"
-            .parse::<Url>()
-            .unwrap();
-        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
-        let response_redirect = request.make().unwrap();
-
-        let url_no_redirect = "https://browser.engineering/http.html"
-            .parse::<Url>()
-            .unwrap();
-        let response_no_redirect = Request::get(url_no_redirect.as_web_url()).unwrap();
-        assert_eq!(response_redirect.body, response_no_redirect.body);
+    fn keep_alive_http() {
+        test_url_keepalive("https://example.com");
     }
 }

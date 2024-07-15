@@ -34,7 +34,9 @@ fn parse_body(body: &str, render: bool) -> Result<String> {
     Ok(result)
 }
 
-pub fn load(url: &str) -> Result<()> {
+// fn handle_redirects()
+
+fn load(url: &str) -> Result<String> {
     let url = url.parse::<url::Url>()?;
 
     match url {
@@ -47,16 +49,14 @@ pub fn load(url: &str) -> Result<()> {
                     .as_str(),
                 true,
             )?;
-            println!("{parsed_body}");
+            Ok(parsed_body)
         }
         url::Url::File(url) => {
             let contents = fs::read(&url.path).context(url.path)?;
             let contents = String::from_utf8_lossy(&contents);
-            println!("{contents}");
+            Ok(contents.to_string())
         }
-        url::Url::Data(url) => {
-            println!("{}", url.data);
-        }
+        url::Url::Data(url) => Ok(url.data),
         url::Url::ViewSource(url) => {
             let response = request::Request::get(&url)?;
             let parsed_body = parse_body(
@@ -66,16 +66,22 @@ pub fn load(url: &str) -> Result<()> {
                     .as_str(),
                 false,
             )?;
-            println!("{parsed_body}");
+            Ok(parsed_body)
         }
     }
+}
 
+pub fn show(url: &str) -> Result<()> {
+    let body = load(url)?;
+    println!("{body}");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::request::{Request, RequestMethod};
+    use crate::url::Url;
     use std::env;
 
     #[test]
@@ -104,5 +110,44 @@ mod tests {
     #[test]
     fn load_view_source() {
         load("view-source:http://example.org/").unwrap();
+    }
+
+    fn test_redirect_equality(url_redirect: &str, url_no_redirect: &str) {
+        let url_no_redirect = url_no_redirect.parse::<Url>().unwrap();
+        let url_no_redirect = url_no_redirect.as_web_url();
+
+        let url = url_redirect.parse::<Url>().unwrap();
+        let url = url.as_web_url();
+
+        let response_no_redirect = Request::get(url_no_redirect).unwrap();
+
+        let mut request = Request::init(RequestMethod::Get, &url.host, true);
+        let response_redirect = request.make(url, None).unwrap();
+
+        assert_eq!(response_redirect.body, response_no_redirect.body);
+    }
+
+    #[test]
+    fn redirect() {
+        test_redirect_equality(
+            "https://browser.engineering/redirect",
+            "https://browser.engineering/http.html",
+        );
+    }
+
+    #[test]
+    fn redirect_2() {
+        test_redirect_equality(
+            "https://browser.engineering/redirect2",
+            "https://browser.engineering/http.html",
+        );
+    }
+
+    #[test]
+    fn redirect_3() {
+        test_redirect_equality(
+            "https://browser.engineering/redirect3",
+            "https://browser.engineering/http.html",
+        );
     }
 }
