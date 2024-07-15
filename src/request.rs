@@ -1,9 +1,10 @@
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::{Display, Formatter};
 use std::io;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -11,6 +12,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use lazy_static::lazy_static;
 use thiserror::Error;
+
+use crate::url::{Scheme, UrlError, WebUrl};
 
 const USER_AGENT: &str = "Octo";
 
@@ -23,21 +26,6 @@ lazy_static! {
             .with_root_certificates(ROOT_STORE.clone())
             .with_no_client_auth()
     );
-}
-
-#[derive(Error, Debug)]
-pub(crate) enum UrlError {
-    #[error("error splitting the URL: `{0}`")]
-    Split(String),
-
-    #[error("unknown URL scheme: {0}")]
-    UnknownScheme(String),
-
-    #[error("failed to parse the port: {0}")]
-    InvalidPort(#[from] ParseIntError),
-
-    #[error("Invalid url: {0}")]
-    InvalidUrl(String),
 }
 
 #[derive(Error, Debug)]
@@ -59,6 +47,9 @@ pub(crate) enum ResponseError {
 
     #[error("failed to parse the status code: {0}")]
     InvalidStatusCode(#[from] ParseIntError),
+
+    #[error("failed to parse the headers: {0}")]
+    Headers(String),
 }
 
 #[derive(Error, Debug)]
@@ -78,169 +69,6 @@ pub(crate) enum NetworkError {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum Scheme {
-    Http,
-    Https,
-    File,
-    Data,
-    ViewSource,
-}
-
-impl Scheme {
-    fn default_port(&self) -> Option<u16> {
-        match self {
-            Self::Http => Some(80),
-            Self::Https => Some(443),
-            _ => None,
-        }
-    }
-}
-
-impl FromStr for Scheme {
-    type Err = UrlError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "http" => Ok(Self::Http),
-            "https" => Ok(Self::Https),
-            "file" => Ok(Self::File),
-            "data" => Ok(Self::Data),
-            "view-source" => Ok(Self::ViewSource),
-            _ => Err(UrlError::UnknownScheme(s.to_string())),
-        }
-    }
-}
-
-impl Display for Scheme {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let scheme_string = match self {
-            // I could use some fancy PascalCase to kebab-case conversion logic,
-            // but it's probably not worth it for this one-off case.
-            Self::ViewSource => "view-source".to_string(),
-            _ => {
-                // This feels like I am abusing the Debug representation, but it works.
-                format!("{self:?}")
-                    .strip_prefix("Scheme::")
-                    .unwrap()
-                    .to_lowercase()
-            }
-        };
-        write!(f, "{scheme_string}")
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum Url {
-    Web(WebUrl),
-    File(FileUrl),
-    Data(DataUrl),
-    ViewSource(WebUrl),
-}
-
-impl FromStr for Url {
-    type Err = UrlError;
-
-    fn from_str(url: &str) -> Result<Self, Self::Err> {
-        let (scheme, url_rest) = url
-            .split_once(':')
-            .ok_or_else(|| UrlError::Split(url.to_string()))?;
-        let scheme = scheme.parse::<Scheme>()?;
-
-        if matches!(scheme, Scheme::Data) {
-            return Ok(Self::Data(url_rest.parse::<DataUrl>()?));
-        } else if matches!(scheme, Scheme::ViewSource) {
-            // Parse the URL that view-source points to.
-            return match url_rest.parse::<Self>()? {
-                Self::Web(url) => Ok(Self::ViewSource(url)),
-                _ => Err(UrlError::InvalidUrl(format!(
-                    "Invalid resource URL for {scheme}: {}",
-                    url
-                ))),
-            };
-        }
-
-        let url = url_rest
-            .strip_prefix("//")
-            .ok_or_else(|| UrlError::Split(url_rest.to_string()))?;
-
-        let url = if url.contains('/') {
-            url.to_string()
-        } else {
-            format!("{url}/")
-        };
-
-        let (host, url) = url
-            .split_once('/')
-            .ok_or_else(|| UrlError::Split(url.to_string()))?;
-        let path = format!("/{url}");
-
-        match scheme {
-            Scheme::Http | Scheme::Https => {
-                let (host, port) = if let Some((new_host, port_str)) = host.split_once(':') {
-                    (new_host, port_str.parse::<u16>()?)
-                } else {
-                    // Http and Https are guaranteed to have a default port, so safe to unwrap.
-                    (host, scheme.default_port().unwrap())
-                };
-                Ok(Self::Web(WebUrl {
-                    scheme,
-                    host: host.to_string(),
-                    path,
-                    port,
-                }))
-            }
-            Scheme::File => Ok(Self::File(FileUrl {
-                scheme,
-                host: host.to_string(),
-                path,
-            })),
-            // We handled this above, so this will never happen.
-            Scheme::Data | Scheme::ViewSource => unreachable!(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct WebUrl {
-    pub scheme: Scheme,
-    pub path: String,
-    pub host: String,
-    pub port: u16,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct FileUrl {
-    pub scheme: Scheme,
-    pub path: String,
-    pub host: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct DataUrl {
-    pub scheme: Scheme,
-    // TODO: Use enumerated mimetypes instead of String
-    pub mimetype: String,
-    // TODO: Add base64 bool field
-    pub data: String,
-}
-
-impl FromStr for DataUrl {
-    type Err = UrlError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // TODO: Currently doesn't handle parsing the optional base64 token.
-        let (mimetype, data) = s
-            .split_once(',')
-            .ok_or_else(|| UrlError::Split(s.to_string()))?;
-        Ok(Self {
-            scheme: Scheme::Data,
-            mimetype: mimetype.to_string(),
-            data: data.to_string(),
-        })
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
 pub(crate) enum RequestMethod {
     Get,
 }
@@ -253,25 +81,140 @@ impl Display for RequestMethod {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Abstraction over both `std::net::TcpStream` and `rustls::StreamOwned`
+#[derive(Debug)]
+enum GenericTcpStream {
+    Insecure(TcpStream),
+    Secure(Box<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>),
+}
+
+impl GenericTcpStream {
+    fn connect_insecure(url: &WebUrl) -> Result<Self> {
+        let stream = TcpStream::connect(format!("{}:{}", url.host, url.port))?;
+        Ok(Self::Insecure(stream))
+    }
+
+    fn connect_secure(url: &WebUrl) -> Result<Self> {
+        let stream = TcpStream::connect(format!("{}:{}", url.host, url.port))?;
+        let client = rustls::ClientConnection::new(CONFIG.clone(), url.host.clone().try_into()?)?;
+        let tls = rustls::StreamOwned::new(client, stream);
+        Ok(Self::Secure(Box::new(tls)))
+    }
+
+    fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        match self {
+            Self::Insecure(stream) => stream.shutdown(how),
+            Self::Secure(stream) => {
+                let socket = stream.get_ref();
+                socket.shutdown(how)
+            }
+        }
+    }
+
+    fn send(&mut self, request_data: &[u8], keep_alive: bool) -> Result<Response> {
+        self.write_all(request_data)?;
+
+        if keep_alive {
+            let mut response = Response::new_keep_alive(self)?;
+            let content_length = response
+                .headers
+                .get("content-length")
+                .map(|s| s.parse::<usize>())
+                .transpose()?
+                .unwrap_or(0);
+
+            let mut body_buf = Vec::with_capacity(content_length);
+            self.read_exact(&mut body_buf)?;
+            let body = String::from_utf8_lossy(&body_buf).to_string();
+
+            if !body.is_empty() {
+                response.body = Some(body);
+            }
+
+            Ok(response)
+        } else {
+            let mut response_data = String::new();
+            self.read_to_string(&mut response_data)?;
+            // self.shutdown(Shutdown::Both)?;
+            Ok(response_data.parse::<Response>()?)
+        }
+    }
+}
+
+impl Read for GenericTcpStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Insecure(stream) => stream.read(buf),
+            Self::Secure(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for GenericTcpStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Insecure(stream) => stream.write(buf),
+            Self::Secure(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Insecure(stream) => stream.flush(),
+            Self::Secure(stream) => stream.flush(),
+        }
+    }
+}
+
+// Have to make a newtype because OnceCell::get_mut_or_init
+// isn't available on stable, and we need to put the TcpStream in a OnceCell
+// so that it's not dropped (and therefore closed) after every call to Request.make
+#[derive(Debug)]
+struct ReusableTcpStream(OnceCell<GenericTcpStream>);
+
+impl ReusableTcpStream {
+    fn new() -> Self {
+        Self(OnceCell::new())
+    }
+
+    fn get_mut_or_try_init<F>(&mut self, f: F) -> Result<&mut GenericTcpStream>
+    where
+        F: FnOnce() -> Result<GenericTcpStream>,
+    {
+        // There might be a more elegant way of doing this,
+        // but this satisfies the borrow checker, and is good enough for now.
+        if self.0.get().is_none() {
+            let stream = f()?;
+            self.0.set(stream).unwrap();
+        }
+        Ok(self.0.get_mut().unwrap())
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct Request {
     method: RequestMethod,
     headers: HashMap<String, Vec<String>>,
     body: Option<String>,
     // TODO: Switch to &WebUrl to avoid taking ownership/cloning?
     url: WebUrl,
+    stream: ReusableTcpStream,
+    keep_alive: bool,
 }
 
 impl Request {
-    pub(crate) fn init(method: RequestMethod, url: WebUrl) -> Self {
+    pub(crate) fn init(method: RequestMethod, url: WebUrl, keep_alive: bool) -> Self {
+        let connection_value = if keep_alive { "keep-alive" } else { "close" };
         Self {
             method,
             headers: HashMap::from([
                 ("Host".to_string(), vec![url.host.clone()]),
-                ("Connection".to_string(), vec!["close".to_string()]),
+                ("Connection".to_string(), vec![connection_value.to_string()]),
             ]),
             body: None,
             url,
+            stream: ReusableTcpStream::new(),
+            keep_alive,
         }
     }
 
@@ -297,40 +240,32 @@ impl Request {
         self
     }
 
-    pub(crate) fn make(&self) -> Result<Response> {
-        let read_buf = {
-            let mut read_buf = String::new();
-            match self.url.scheme {
-                Scheme::Http => {
-                    let mut stream =
-                        TcpStream::connect(format!("{}:{}", self.url.host, self.url.port,))?;
-                    stream.write_all(self.to_string().as_bytes())?;
-                    stream.read_to_string(&mut read_buf)?;
-                }
-                Scheme::Https => {
-                    let mut client = rustls::ClientConnection::new(
-                        CONFIG.clone(),
-                        self.url.host.clone().try_into()?,
-                    )?;
+    pub(crate) fn make(&mut self) -> Result<Response> {
+        if !matches!(self.url.scheme, Scheme::Http) && !matches!(self.url.scheme, Scheme::Https) {
+            return Err(RequestError::InvalidScheme(self.url.scheme).into());
+        }
+        let self_string = self.to_string();
 
-                    let mut stream =
-                        TcpStream::connect(format!("{}:{}", self.url.host, self.url.port,))?;
-                    let mut tls = rustls::Stream::new(&mut client, &mut stream);
-                    tls.write_all(self.to_string().as_bytes())?;
-                    tls.read_to_string(&mut read_buf)?;
-                }
-                _ => return Err(RequestError::InvalidScheme(self.url.scheme).into()),
+        let stream = self.stream.get_mut_or_try_init(|| {
+            if matches!(self.url.scheme, Scheme::Http) {
+                GenericTcpStream::connect_insecure(&self.url)
+            } else {
+                // HTTPS
+                GenericTcpStream::connect_secure(&self.url)
             }
-            read_buf
-        };
-        Ok(Response::from_str(&read_buf)?)
-    }
+        })?;
 
+        let response = stream.send(self_string.as_bytes(), self.keep_alive)?;
+        Ok(response)
+    }
+}
+
+impl Request {
     /// Convenience method to make a GET request
     /// to the given URL with the defaylt `User-Agent`
     /// and return the resulting `Response` or error.
     pub(crate) fn get(url: &WebUrl) -> Result<Response> {
-        let request = Self::init(RequestMethod::Get, url.clone())
+        let mut request = Self::init(RequestMethod::Get, url.clone(), false)
             .with_extra_headers(&[("User-Agent", USER_AGENT)]);
         request.make()
     }
@@ -349,7 +284,7 @@ impl Display for Request {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StatusLine {
     pub version: String,
     pub status_code: u16,
@@ -376,11 +311,54 @@ impl FromStr for StatusLine {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Response {
     pub status_line: StatusLine,
     pub headers: HashMap<String, String>,
     pub body: Option<String>,
+}
+
+impl Response {
+    fn new_keep_alive(stream: &mut GenericTcpStream) -> Result<Self> {
+        // TODO: Use io::BufReader to increase efficiency?
+        let mut status_line = String::new();
+        // Parse the bytes into the status line and then headers
+        // and then stop reading from the stream.
+        while let Some(Ok(byte)) = stream.bytes().next() {
+            let c = char::from(byte);
+            // TODO: Don't include \r so we don't have to call trim() on the string
+            if c == '\n' {
+                break;
+            }
+            status_line.push(c);
+        }
+        let status_line = status_line.trim().parse::<StatusLine>()?;
+
+        // TODO: Support multiple header values for the same header key
+        let mut headers = HashMap::new();
+        let mut current_line = String::new();
+        while let Some(Ok(byte)) = stream.bytes().next() {
+            let c = char::from(byte);
+            current_line.push(c);
+            if current_line.as_str() == "\r\n" {
+                break;
+            }
+
+            if c == '\n' {
+                let (header, value) = current_line
+                    .split_once(':')
+                    .ok_or_else(|| ResponseError::Headers(current_line.clone()))?;
+                headers.insert(header.to_lowercase(), value.trim().to_string());
+                current_line.clear();
+            }
+        }
+
+        Ok(Self {
+            status_line,
+            headers,
+            body: None,
+        })
+    }
 }
 
 impl FromStr for Response {
@@ -417,92 +395,35 @@ impl FromStr for Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::url::Url;
 
     impl Url {
-        fn scheme(&self) -> Scheme {
+        fn as_web_url(&self) -> &WebUrl {
             match self {
-                Self::Web(url) => url.scheme,
-                Self::File(url) => url.scheme,
-                Self::Data(url) => url.scheme,
-                Self::ViewSource(_) => Scheme::ViewSource,
-            }
-        }
-
-        fn path(&self) -> Option<&str> {
-            match self {
-                Self::Web(url) => Some(url.path.as_str()),
-                Self::File(url) => Some(url.path.as_str()),
-                _ => None,
-            }
-        }
-
-        fn host(&self) -> Option<&str> {
-            match self {
-                Self::Web(url) => Some(url.host.as_str()),
-                Self::File(url) => Some(url.host.as_str()),
-                _ => None,
-            }
-        }
-
-        fn port(&self) -> Option<u16> {
-            match self {
-                Self::Web(url) => Some(url.port),
-                _ => None,
+                Self::Web(url) => url,
+                _ => panic!("Not a WebUrl: {self:?}"),
             }
         }
     }
 
     #[test]
-    fn parse_url() {
-        let url = "http://example.org".parse::<Url>().unwrap();
-        assert!(matches!(url.scheme(), Scheme::Http));
-        assert_eq!(url.host().unwrap(), "example.org");
-        assert_eq!(url.path().unwrap(), "/");
-        assert_eq!(url.port().unwrap(), 80);
+    fn close() {
+        let url = "http://example.com".parse::<Url>().unwrap();
+        let response = Request::get(url.as_web_url()).unwrap();
+        assert!(response.body.is_some());
     }
 
     #[test]
-    fn parse_url_https() {
-        let url = "https://example.org".parse::<Url>().unwrap();
-        assert!(matches!(url.scheme(), Scheme::Https));
-        assert_eq!(url.host().unwrap(), "example.org");
-        assert_eq!(url.path().unwrap(), "/");
-        assert_eq!(url.port().unwrap(), 443);
-    }
+    fn test_keep_alive() {
+        let url = "http://example.com".parse::<Url>().unwrap();
 
-    #[test]
-    fn parse_url_custom_port() {
-        let url = "https://example.org:8000".parse::<Url>().unwrap();
-        assert!(matches!(url.scheme(), Scheme::Https));
-        assert_eq!(url.host().unwrap(), "example.org");
-        assert_eq!(url.path().unwrap(), "/");
-        assert_eq!(url.port().unwrap(), 8000);
-    }
+        let mut request = Request::init(RequestMethod::Get, url.as_web_url().to_owned(), true);
+        let first_response = request.make().unwrap();
+        let second_response = request.make().unwrap();
+        assert_eq!(first_response, second_response);
 
-    #[test]
-    fn parse_data_url() {
-        let url = "data:text/html,Hello world!".parse::<Url>().unwrap();
-        match url {
-            Url::Data(url) => {
-                assert!(matches!(url.scheme, Scheme::Data));
-                assert_eq!(url.mimetype, "text/html");
-                assert_eq!(url.data, "Hello world!");
-            }
-            _ => panic!("Expected a DataUrl, got {url:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_view_source_url() {
-        let url = "view-source:http://example.org/".parse::<Url>().unwrap();
-        match url {
-            Url::ViewSource(url) => {
-                assert!(matches!(url.scheme, Scheme::Http));
-                assert_eq!(url.host, "example.org");
-                assert_eq!(url.path, "/");
-                assert_eq!(url.port, 80);
-            }
-            _ => panic!("Expected a ViewSource url, got {url:?}"),
-        }
+        let one_off_response = Request::get(url.as_web_url()).unwrap();
+        assert_eq!(first_response.body, one_off_response.body);
+        assert_eq!(second_response.body, one_off_response.body);
     }
 }

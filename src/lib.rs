@@ -1,4 +1,5 @@
 mod request;
+mod url;
 
 use std::fs;
 
@@ -9,6 +10,7 @@ fn parse_body(body: &str, render: bool) -> Result<String> {
     let mut current_entity = String::new();
     let mut chars = body.chars();
     let mut result = String::new();
+
     while let Some(c) = chars.next() {
         if c == '&' {
             // This is an entity, so we'll consume the chars until we reach the end.
@@ -28,13 +30,15 @@ fn parse_body(body: &str, render: bool) -> Result<String> {
             result.push(c);
         }
     }
+
     Ok(result)
 }
 
 pub fn load(url: &str) -> Result<()> {
-    let url = url.parse::<request::Url>()?;
+    let url = url.parse::<url::Url>()?;
+
     match url {
-        request::Url::Web(url) => {
+        url::Url::Web(url) => {
             let response = request::Request::get(&url)?;
             let parsed_body = parse_body(
                 response
@@ -45,15 +49,15 @@ pub fn load(url: &str) -> Result<()> {
             )?;
             println!("{parsed_body}");
         }
-        request::Url::File(url) => {
+        url::Url::File(url) => {
             let contents = fs::read(&url.path).context(url.path)?;
             let contents = String::from_utf8_lossy(&contents);
             println!("{contents}");
         }
-        request::Url::Data(url) => {
+        url::Url::Data(url) => {
             println!("{}", url.data);
         }
-        request::Url::ViewSource(url) => {
+        url::Url::ViewSource(url) => {
             let response = request::Request::get(&url)?;
             let parsed_body = parse_body(
                 response
@@ -65,6 +69,7 @@ pub fn load(url: &str) -> Result<()> {
             println!("{parsed_body}");
         }
     }
+
     Ok(())
 }
 
