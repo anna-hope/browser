@@ -50,6 +50,9 @@ pub(crate) enum ResponseError {
 
     #[error("failed to parse the headers: {0}")]
     Headers(String),
+
+    #[error("error reading the response stream: {0}")]
+    Stream(#[from] io::Error),
 }
 
 #[derive(Error, Debug)]
@@ -276,7 +279,7 @@ pub(crate) struct Response {
 }
 
 impl Response {
-    fn from_stream(stream: &mut impl Read) -> Result<Self> {
+    fn from_stream(stream: &mut impl Read) -> Result<Self, ResponseError> {
         let mut reader = BufReader::new(stream);
         let mut status_line = String::new();
         reader.read_line(&mut status_line)?;
@@ -336,32 +339,7 @@ impl FromStr for Response {
     type Err = ResponseError;
 
     fn from_str(s: &str) -> Result<Self, ResponseError> {
-        let mut lines = s.lines();
-        let status_line = lines
-            .next()
-            .ok_or_else(|| ResponseError::MissingStatusLine(s.to_string()))?;
-        let status_line = StatusLine::from_str(status_line)?;
-
-        let headers: HashMap<_, _> = HashMap::from_iter(lines.by_ref().map_while(|line| {
-            let (header, value) = line.split_once(':')?;
-            Some((header.to_lowercase(), value.to_string()))
-        }));
-
-        assert!(!headers.contains_key("transfer-encoding"));
-        assert!(!headers.contains_key("content-encoding"));
-
-        let mut body = String::with_capacity(s.len());
-
-        for line in lines {
-            body.push_str(line);
-            body.push('\n');
-        }
-
-        Ok(Self {
-            status_line,
-            headers,
-            body: Some(body),
-        })
+        Self::from_stream(&mut s.as_bytes())
     }
 }
 
