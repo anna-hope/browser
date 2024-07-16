@@ -3,7 +3,12 @@ mod url;
 
 use std::fs;
 
+use crate::request::RequestMethod;
+use crate::url::Url;
 use anyhow::{anyhow, Context, Result};
+
+// TODO: Check what real browsers set this to.
+const MAX_REDIRECTS: u8 = 5;
 
 fn parse_body(body: &str, render: bool) -> Result<String> {
     let mut in_tag = false;
@@ -34,30 +39,47 @@ fn parse_body(body: &str, render: bool) -> Result<String> {
     Ok(result)
 }
 
-// fn handle_redirects()
-
 fn load(url: &str) -> Result<String> {
     let url = url.parse::<url::Url>()?;
 
     match url {
-        url::Url::Web(url) => {
-            let response = request::Request::get(&url)?;
+        Url::Web(url) => {
+            let mut request = request::Request::init(RequestMethod::Get, &url.host, true);
+            let response = request.make(&url, None)?;
+            let mut status_code = response.status_code();
+            let mut num_redirects = 0;
+            let mut body = response.body.clone();
+
+            while (300..400).contains(&status_code) && num_redirects < MAX_REDIRECTS {
+                let new_url = response
+                    .headers
+                    .get("location")
+                    .ok_or_else(|| anyhow!("Missing location in {response:?}"))?;
+                let new_url = new_url.parse::<Url>()?;
+                let new_url = new_url
+                    .as_web_url()
+                    .ok_or_else(|| anyhow!("Not a WebUrl: {new_url:?}"))
+                    .context(anyhow!("{response:?}"))?;
+
+                let response = request.make(new_url, None)?;
+                status_code = response.status_code();
+                body = response.body;
+                num_redirects += 1;
+            }
+
             let parsed_body = parse_body(
-                response
-                    .body
-                    .ok_or_else(|| anyhow!("Empty response body"))?
-                    .as_str(),
+                body.ok_or_else(|| anyhow!("Empty response body"))?.as_str(),
                 true,
             )?;
             Ok(parsed_body)
         }
-        url::Url::File(url) => {
+        Url::File(url) => {
             let contents = fs::read(&url.path).context(url.path)?;
             let contents = String::from_utf8_lossy(&contents);
             Ok(contents.to_string())
         }
-        url::Url::Data(url) => Ok(url.data),
-        url::Url::ViewSource(url) => {
+        Url::Data(url) => Ok(url.data),
+        Url::ViewSource(url) => {
             let response = request::Request::get(&url)?;
             let parsed_body = parse_body(
                 response
@@ -114,10 +136,10 @@ mod tests {
 
     fn test_redirect_equality(url_redirect: &str, url_no_redirect: &str) {
         let url_no_redirect = url_no_redirect.parse::<Url>().unwrap();
-        let url_no_redirect = url_no_redirect.as_web_url();
+        let url_no_redirect = url_no_redirect.as_web_url().unwrap();
 
         let url = url_redirect.parse::<Url>().unwrap();
-        let url = url.as_web_url();
+        let url = url.as_web_url().unwrap();
 
         let response_no_redirect = Request::get(url_no_redirect).unwrap();
 

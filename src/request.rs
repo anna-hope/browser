@@ -326,6 +326,10 @@ impl Response {
             body,
         })
     }
+
+    pub(crate) fn status_code(&self) -> u16 {
+        self.status_line.status_code
+    }
 }
 
 impl FromStr for Response {
@@ -369,13 +373,13 @@ mod tests {
     #[test]
     fn close() {
         let url = "http://example.com".parse::<Url>().unwrap();
-        let response = Request::get(url.as_web_url()).unwrap();
+        let response = Request::get(url.as_web_url().unwrap()).unwrap();
         assert!(response.body.is_some());
     }
 
     fn test_url_keepalive(url: &str) {
         let url = url.parse::<Url>().unwrap();
-        let url = url.as_web_url();
+        let url = url.as_web_url().unwrap();
 
         let mut request = Request::init(RequestMethod::Get, &url.host, true);
         let first_response = request.make(url, None).unwrap();

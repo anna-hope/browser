@@ -78,6 +78,15 @@ pub(crate) enum Url {
     ViewSource(WebUrl),
 }
 
+impl Url {
+    pub(crate) fn as_web_url(&self) -> Option<&WebUrl> {
+        match self {
+            Self::Web(url) => Some(url),
+            _ => None,
+        }
+    }
+}
+
 impl FromStr for Url {
     type Err = UrlError;
 
@@ -215,13 +224,6 @@ pub(crate) mod tests {
             match self {
                 Self::Web(url) => Some(url.port),
                 _ => None,
-            }
-        }
-
-        pub(crate) fn as_web_url(&self) -> &WebUrl {
-            match self {
-                Self::Web(url) => url,
-                _ => panic!("Not a WebUrl: {self:?}"),
             }
         }
     }
