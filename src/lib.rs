@@ -40,12 +40,12 @@ fn parse_body(body: &str, render: bool) -> Result<String> {
 }
 
 fn load(url: &str) -> Result<String> {
-    let url = url.parse::<url::Url>()?;
+    let url = url.parse::<Url>()?;
 
     match url {
         Url::Web(url) => {
             let mut request = request::Request::init(RequestMethod::Get, &url.host, true);
-            let response = request.make(&url, None)?;
+            let mut response = request.make(&url, None)?;
             let mut status_code = response.status_code();
             let mut num_redirects = 0;
             let mut body = response.body.clone();
@@ -61,9 +61,9 @@ fn load(url: &str) -> Result<String> {
                     .ok_or_else(|| anyhow!("Not a WebUrl: {new_url:?}"))
                     .context(anyhow!("{response:?}"))?;
 
-                let response = request.make(new_url, None)?;
+                response = request.make(new_url, None)?;
                 status_code = response.status_code();
-                body = response.body;
+                body.clone_from(&response.body);
                 num_redirects += 1;
             }
 
