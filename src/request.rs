@@ -257,7 +257,7 @@ impl FromStr for StatusLine {
             if parts.len() < 3 {
                 return Err(ResponseError::InvalidStatusLine(s.to_string()));
             }
-            (parts[0], parts[1], parts[2])
+            (parts[0], parts[1], parts[2].trim())
         };
         let status_code = status.parse::<u16>()?;
         Ok(Self {
