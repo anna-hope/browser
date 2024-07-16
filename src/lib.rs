@@ -10,34 +10,72 @@ use anyhow::{anyhow, Context, Result};
 // TODO: Check what real browsers set this to.
 const MAX_REDIRECTS: u8 = 5;
 
+// AFAIK no entity in the spec is longer than 26 chars.
+const MAX_ENTITY_LEN: usize = 26;
+
 fn parse_body(body: &str, render: bool) -> Result<String> {
     let mut in_tag = false;
     let mut current_entity = String::new();
-    let mut chars = body.chars();
-    let mut result = String::new();
+    let mut skip_entity = false;
 
-    while let Some(c) = chars.next() {
+    let mut result = String::new();
+    // TODO: Replace with something more efficient than effectively duplicating
+    // the whole input string.
+    let chars = body.chars().collect::<Vec<_>>();
+
+    let mut current_index = 0;
+    while current_index < chars.len() {
+        let c = chars[current_index];
+
         if c == '&' {
-            // This is an entity, so we'll consume the chars until we reach the end.
-            current_entity.extend(chars.by_ref().take_while(|c| *c != ';'));
-            let entity_char = match current_entity.as_str() {
-                "lt" => '<',
-                "gt" => '>',
-                _ => {
-                    // Skip entities we don't know.
-                    eprintln!("Skipping unknown entity: {current_entity}");
-                    continue;
+            if skip_entity {
+                // Reset.
+                skip_entity = false;
+            } else {
+                // This is an entity, so we'll consume the chars until we reach its end.
+
+                // TODO: Use https://html.spec.whatwg.org/entities.json to get all entities
+                // in the spec?
+
+                current_entity.push(c);
+                current_index += 1;
+
+                while let Some(&next_char) = chars.get(current_index) {
+                    current_entity.push(next_char);
+                    current_index += 1;
+                    if next_char == ';' || current_entity.len() == MAX_ENTITY_LEN {
+                        break;
+                    }
                 }
-            };
-            result.push(entity_char);
-            current_entity.clear();
-        } else if c == '<' && render {
+
+                let parsed_entity = match current_entity.as_str() {
+                    "&lt;" => Some('<'),
+                    "&gt;" => Some('>'),
+                    _ => None,
+                };
+
+                if let Some(entity) = parsed_entity {
+                    result.push(entity);
+                } else {
+                    // Skip entities we don't know by "rewinding" the index
+                    // to start at the current entity (or whatever else starts with &).
+                    // (I don't love this.)
+                    skip_entity = true;
+                    current_index -= current_entity.len();
+                }
+                current_entity.clear();
+                continue;
+            }
+        }
+
+        if c == '<' && render {
             in_tag = true;
         } else if c == '>' && render {
             in_tag = false;
         } else if !in_tag {
             result.push(c);
         }
+        current_index += 1;
     }
 
     Ok(result)
@@ -129,6 +167,13 @@ mod tests {
         let example = "&lt;div&gt;";
         let parsed = parse_body(example, true).unwrap();
         assert_eq!(parsed, "<div>");
+    }
+
+    #[test]
+    fn skip_unknown_entities() {
+        let example = "&potato;div&chips;";
+        let parsed = parse_body(example, true).unwrap();
+        assert_eq!(parsed, example);
     }
 
     #[test]
