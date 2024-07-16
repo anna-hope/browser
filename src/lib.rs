@@ -23,7 +23,11 @@ fn parse_body(body: &str, render: bool) -> Result<String> {
             let entity_char = match current_entity.as_str() {
                 "lt" => '<',
                 "gt" => '>',
-                _ => return Err(anyhow!("Unknown entity: {}", current_entity)),
+                _ => {
+                    // Skip entities we don't know.
+                    eprintln!("Skipping unknown entity: {current_entity}");
+                    continue;
+                }
             };
             result.push(entity_char);
             current_entity.clear();
@@ -102,8 +106,6 @@ pub fn show(url: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::request::{Request, RequestMethod};
-    use crate::url::Url;
     use std::env;
 
     #[test]
@@ -134,42 +136,34 @@ mod tests {
         load("view-source:http://example.org/").unwrap();
     }
 
-    fn test_redirect_equality(url_redirect: &str, url_no_redirect: &str) {
-        let url_no_redirect = url_no_redirect.parse::<Url>().unwrap();
-        let url_no_redirect = url_no_redirect.as_web_url().unwrap();
-
-        let url = url_redirect.parse::<Url>().unwrap();
-        let url = url.as_web_url().unwrap();
-
-        let response_no_redirect = Request::get(url_no_redirect).unwrap();
-
-        let mut request = Request::init(RequestMethod::Get, &url.host, true);
-        let response_redirect = request.make(url, None).unwrap();
-
-        assert_eq!(response_redirect.body, response_no_redirect.body);
+    fn test_redirect_equality(url_redirect: &str, url_no_redirect: &str) -> Result<()> {
+        let body_no_redirect = load(url_no_redirect)?;
+        let body_redirect = load(url_redirect)?;
+        assert_eq!(body_redirect, body_no_redirect);
+        Ok(())
     }
 
     #[test]
-    fn redirect() {
+    fn redirect() -> Result<()> {
         test_redirect_equality(
             "https://browser.engineering/redirect",
             "https://browser.engineering/http.html",
-        );
+        )
     }
 
     #[test]
-    fn redirect_2() {
+    fn redirect_2() -> Result<()> {
         test_redirect_equality(
             "https://browser.engineering/redirect2",
             "https://browser.engineering/http.html",
-        );
+        )
     }
 
     #[test]
-    fn redirect_3() {
+    fn redirect_3() -> Result<()> {
         test_redirect_equality(
             "https://browser.engineering/redirect3",
             "https://browser.engineering/http.html",
-        );
+        )
     }
 }
