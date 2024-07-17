@@ -98,10 +98,11 @@ fn load(url: &str) -> Result<String> {
                     .get("location")
                     .ok_or_else(|| anyhow!("Missing location in {response:?}"))?;
 
-                let new_url = new_url.parse::<Url>().or_else(|error| match error {
-                    UrlError::Split(_) => Ok(Url::Web(url.with_path(new_url))),
-                    _ => Err(error),
-                })?;
+                let new_url = if new_url.starts_with('/') {
+                    Url::Web(url.with_path(new_url))
+                } else {
+                    new_url.parse::<Url>()?
+                };
 
                 let new_url = new_url
                     .as_web_url()
