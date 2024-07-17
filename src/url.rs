@@ -171,6 +171,7 @@ impl WebUrl {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct FileUrl {
     pub scheme: Scheme,
@@ -178,6 +179,7 @@ pub(crate) struct FileUrl {
     pub host: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct DataUrl {
     pub scheme: Scheme,
