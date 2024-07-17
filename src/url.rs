@@ -18,7 +18,7 @@ pub(crate) enum UrlError {
     InvalidUrl(String),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) enum Scheme {
     Http,
     Https,
@@ -150,7 +150,7 @@ impl FromStr for Url {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct WebUrl {
     pub scheme: Scheme,
     pub host: String,
