@@ -4,7 +4,7 @@ mod url;
 use std::fs;
 
 use crate::request::RequestMethod;
-use crate::url::Url;
+use crate::url::{Url, UrlError};
 use anyhow::{anyhow, Context, Result};
 
 // TODO: Check what real browsers set this to.
@@ -97,7 +97,12 @@ fn load(url: &str) -> Result<String> {
                     .headers
                     .get("location")
                     .ok_or_else(|| anyhow!("Missing location in {response:?}"))?;
-                let new_url = new_url.parse::<Url>()?;
+
+                let new_url = new_url.parse::<Url>().or_else(|error| match error {
+                    UrlError::Split(_) => Ok(Url::Web(url.with_path(new_url))),
+                    _ => Err(error),
+                })?;
+
                 let new_url = new_url
                     .as_web_url()
                     .ok_or_else(|| anyhow!("Not a WebUrl: {new_url:?}"))

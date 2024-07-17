@@ -153,9 +153,22 @@ impl FromStr for Url {
 #[derive(Debug, Clone)]
 pub(crate) struct WebUrl {
     pub scheme: Scheme,
-    pub path: String,
     pub host: String,
+    pub path: String,
     pub port: u16,
+}
+
+impl WebUrl {
+    /// Convenience method to construct a new URL with the given path
+    /// (useful for relative URLs, e.g. in redirects).
+    pub(crate) fn with_path(&self, path: &str) -> Self {
+        Self {
+            scheme: self.scheme,
+            host: self.host.clone(),
+            path: path.to_string(),
+            port: self.port,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
