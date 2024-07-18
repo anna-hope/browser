@@ -242,4 +242,13 @@ mod tests {
             "https://browser.engineering/http.html",
         )
     }
+
+    #[test]
+    fn cache() -> Result<()> {
+        let mut browser = Browser::default();
+        browser.load("https://example.org")?;
+        browser.load("https://browser.engineering/http.html")?;
+        assert!(!browser.cache.into_iter().collect::<Vec<_>>().is_empty());
+        Ok(())
+    }
 }

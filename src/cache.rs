@@ -52,7 +52,7 @@ impl ResponseWithCacheProperties {
 }
 
 #[derive(Default)]
-pub(crate) struct MaybeCachedResponse {
+pub struct MaybeCachedResponse {
     inner: Option<Weak<Response>>,
 }
 
@@ -63,7 +63,7 @@ impl MaybeCachedResponse {
         }
     }
 
-    pub(crate) fn get(&self) -> Option<impl AsRef<Response>> {
+    pub fn get(&self) -> Option<impl AsRef<Response>> {
         self.inner.as_ref().map(Weak::upgrade)?
     }
 }
@@ -96,5 +96,36 @@ impl Cache {
         }
 
         MaybeCachedResponse::default()
+    }
+}
+
+pub struct Iter<'a> {
+    base: std::collections::hash_map::Iter<'a, WebUrl, ResponseWithCacheProperties>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = (String, &'a str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (url, response) = self.base.next()?;
+        let url = url.to_string();
+        // TODO: Replace with some reasonable representation of the response.
+        let response_string = response
+            .response
+            .headers
+            .get("cache-control")
+            .map(|s| s.as_str())?;
+        Some((url, response_string))
+    }
+}
+
+impl<'a> IntoIterator for &'a Cache {
+    type Item = (String, &'a str);
+    type IntoIter = Iter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter {
+            base: self.cache.iter(),
+        }
     }
 }
