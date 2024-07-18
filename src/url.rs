@@ -60,10 +60,7 @@ impl Display for Scheme {
             Self::ViewSource => "view-source".to_string(),
             _ => {
                 // This feels like I am abusing the Debug representation, but it works.
-                format!("{self:?}")
-                    .strip_prefix("Scheme::")
-                    .unwrap()
-                    .to_lowercase()
+                format!("{self:?}").to_lowercase()
             }
         };
         write!(f, "{scheme_string}")
@@ -168,6 +165,16 @@ impl WebUrl {
             path: path.to_string(),
             port: self.port,
         }
+    }
+}
+
+impl Display for WebUrl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}://{}:{}{}",
+            self.scheme, self.host, self.port, self.path
+        )
     }
 }
 
@@ -295,5 +302,24 @@ pub(crate) mod tests {
             }
             _ => panic!("Expected a ViewSource url, got {url:?}"),
         }
+    }
+
+    #[test]
+    fn web_url_display() {
+        let url_str = "https://example.org:443/";
+        let url = url_str.parse::<Url>().unwrap();
+        let web_url = url.as_web_url().unwrap();
+        assert_eq!(web_url.to_string().as_str(), url_str);
+    }
+
+    #[test]
+    fn web_url_display_2() {
+        let url_str = "https://browser.engineering/http.html";
+        let url = url_str.parse::<Url>().unwrap();
+        let web_url = url.as_web_url().unwrap();
+        assert_eq!(
+            web_url.to_string().as_str(),
+            "https://browser.engineering:443/http.html"
+        );
     }
 }
