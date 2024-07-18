@@ -38,7 +38,7 @@ pub(crate) enum RequestError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum ResponseError {
+pub enum ResponseError {
     #[error("missing status line: {0}")]
     MissingStatusLine(String),
 
@@ -272,8 +272,8 @@ impl FromStr for StatusLine {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Response {
-    pub status_line: StatusLine,
+pub struct Response {
+    status_line: StatusLine,
     pub headers: HashMap<String, String>,
     pub body: Option<String>,
 }

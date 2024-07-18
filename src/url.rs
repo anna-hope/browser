@@ -4,7 +4,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub(crate) enum UrlError {
+pub enum UrlError {
     #[error("error splitting the URL: `{0}`")]
     Split(String),
 
@@ -19,7 +19,7 @@ pub(crate) enum UrlError {
 }
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub(crate) enum Scheme {
+pub enum Scheme {
     Http,
     Https,
     File,
@@ -148,7 +148,7 @@ impl FromStr for Url {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct WebUrl {
+pub struct WebUrl {
     pub scheme: Scheme,
     pub host: String,
     pub path: String,
