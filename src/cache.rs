@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -7,16 +8,19 @@ use chrono::{DateTime, FixedOffset, Local, TimeDelta};
 use crate::request::Response;
 use crate::url::WebUrl;
 
-#[derive(Debug)]
-struct ResponseCacheProperties {
+type ResponseCacheProperties = (DateTime<FixedOffset>, TimeDelta);
+
+#[derive(Debug, PartialEq)]
+struct ResponseWithCacheProperties {
+    response: Arc<Response>,
     date: DateTime<FixedOffset>,
-    // Store as TimeDelta instead of Duration to catch out-of-bounds errors at creation
-    // and reduce overhead later when comparing with current time.
+    // Store as TimeDelta instead of Duration to avoid recomputing it and handling potential
+    // errors every time we query the cache.
     max_age: TimeDelta,
 }
 
-impl ResponseCacheProperties {
-    fn from_response(response: &Response) -> Result<Self> {
+impl ResponseWithCacheProperties {
+    fn parse_cache_properties(response: &Response) -> Result<ResponseCacheProperties> {
         let headers = &response.headers;
         let date = headers
             .get("date")
@@ -31,26 +35,36 @@ impl ResponseCacheProperties {
 
             TimeDelta::from_std(max_age)?
         } else {
-            return Err(anyhow!("No cache-control header in headers: {headers:?}"));
+            return Err(anyhow!("No cache-control header: {headers:?}"));
         };
 
-        Ok(Self { date, max_age })
+        Ok((date, max_age))
+    }
+
+    fn new(response: Response) -> Result<Self> {
+        let (date, max_age) = Self::parse_cache_properties(&response)?;
+        Ok(Self {
+            response: Arc::new(response),
+            date,
+            max_age,
+        })
     }
 }
 
-#[derive(Debug)]
-struct ResponseWithCacheProperties {
-    response: Response,
-    cache_properties: ResponseCacheProperties,
+#[derive(Default)]
+pub(crate) struct MaybeCachedResponse {
+    inner: Option<Weak<Response>>,
 }
 
-impl ResponseWithCacheProperties {
-    fn new(response: Response) -> Result<Self> {
-        let cache_properties = ResponseCacheProperties::from_response(&response)?;
-        Ok(Self {
-            response,
-            cache_properties,
-        })
+impl MaybeCachedResponse {
+    fn new(wrapped_response: &Arc<Response>) -> Self {
+        Self {
+            inner: Some(Arc::downgrade(wrapped_response)),
+        }
+    }
+
+    pub(crate) fn get(&self) -> Option<impl AsRef<Response>> {
+        self.inner.as_ref().map(Weak::upgrade)?
     }
 }
 
@@ -60,28 +74,27 @@ pub struct Cache {
 }
 
 impl Cache {
-    fn remove(&mut self, url: &WebUrl) -> Option<Response> {
-        self.cache.remove(url).map(|r| r.response)
-    }
-
-    pub fn get(&self, url: &WebUrl) -> Option<&Response> {
-        if let Some(response_with_cache_props) = self.cache.get(url) {
-            let current_time = Local::now().fixed_offset();
-            let delta = current_time - response_with_cache_props.cache_properties.date;
-            if delta < response_with_cache_props.cache_properties.max_age {
-                Some(&response_with_cache_props.response)
-            } else {
-                // Evict this response.
-                None
-            }
-        } else {
-            None
-        }
-    }
-
     pub fn insert(&mut self, url: WebUrl, response: Response) -> Result<()> {
         let response_with_cache_properties = ResponseWithCacheProperties::new(response)?;
         self.cache.insert(url, response_with_cache_properties);
         Ok(())
+    }
+
+    fn remove(&mut self, url: &WebUrl) -> Option<Response> {
+        self.cache
+            .remove(url)
+            .map(|r| Arc::unwrap_or_clone(r.response))
+    }
+
+    pub fn get(&self, url: &WebUrl) -> MaybeCachedResponse {
+        if let Some(response_with_cache_props) = self.cache.get(url) {
+            let current_time = Local::now().fixed_offset();
+            let delta = current_time - response_with_cache_props.date;
+            if delta < response_with_cache_props.max_age {
+                return MaybeCachedResponse::new(&response_with_cache_props.response);
+            }
+        }
+
+        MaybeCachedResponse::default()
     }
 }
