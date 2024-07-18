@@ -22,21 +22,30 @@ struct ResponseWithCacheProperties {
 impl ResponseWithCacheProperties {
     fn parse_cache_properties(response: &Response) -> Result<ResponseCacheProperties> {
         let headers = &response.headers;
+
+        // This feels kind of unhinged.
         let date = headers
             .get("date")
             .ok_or_else(|| anyhow!("Missing date in headers"))
-            .map(|s| DateTime::parse_from_rfc2822(s.as_str()))??;
+            .map(|values| {
+                values
+                    .get(0)
+                    .ok_or_else(|| anyhow!("No value for date"))
+                    .map(|s| s.as_str())
+            })?
+            .map(|s| DateTime::parse_from_rfc2822(s))??;
 
-        let max_age = if let Some(cache_control) = headers.get("cache-control") {
-            let max_age = cache_control
-                .strip_prefix("max-age=")
-                .ok_or_else(|| anyhow!("Invalid value for cache-control: {cache_control}"))?;
-            let max_age = max_age.parse::<u64>().map(Duration::from_secs)?;
+        let max_age =
+            if let Some(Some(cache_control)) = headers.get("cache-control").map(|v| v.get(0)) {
+                let max_age = cache_control
+                    .strip_prefix("max-age=")
+                    .ok_or_else(|| anyhow!("Invalid value for cache-control: {cache_control}"))?;
+                let max_age = max_age.parse::<u64>().map(Duration::from_secs)?;
 
-            TimeDelta::from_std(max_age)?
-        } else {
-            return Err(anyhow!("No cache-control header: {headers:?}"));
-        };
+                TimeDelta::from_std(max_age)?
+            } else {
+                return Err(anyhow!("No cache-control header: {headers:?}"));
+            };
 
         Ok((date, max_age))
     }
@@ -104,23 +113,19 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = (String, &'a str);
+    type Item = (String, String);
 
     fn next(&mut self) -> Option<Self::Item> {
         let (url, response) = self.base.next()?;
         let url = url.to_string();
         // TODO: Replace with some reasonable representation of the response.
-        let response_string = response
-            .response
-            .headers
-            .get("cache-control")
-            .map(|s| s.as_str())?;
+        let response_string = response.response.headers.to_string();
         Some((url, response_string))
     }
 }
 
 impl<'a> IntoIterator for &'a Cache {
-    type Item = (String, &'a str);
+    type Item = (String, String);
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {

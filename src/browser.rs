@@ -93,7 +93,7 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
 
 /// Returns the body of a WebUrl, handling potential redirects.
 fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
-    let mut request = request::Request::init(RequestMethod::Get, &url.host, true);
+    let mut request = request::Request::new(RequestMethod::Get, &url.host, true);
     let mut response = request.make(url, None)?;
     let mut status_code = response.status_code();
     let mut num_redirects = 0;
@@ -102,7 +102,9 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
         let new_url = response
             .headers
             .get("location")
-            .ok_or_else(|| anyhow!("Missing location in {response:?}"))?;
+            .ok_or_else(|| anyhow!("Missing Location header in {response:?}"))?
+            .first()
+            .ok_or_else(|| anyhow!("Missing Location value in response headers: {response:?}"))?;
 
         let new_url = if new_url.starts_with('/') {
             Url::Web(url.with_path(new_url))
