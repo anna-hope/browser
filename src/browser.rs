@@ -1,4 +1,4 @@
-use crate::request::RequestMethod;
+use crate::request::{RequestMethod, Response};
 use crate::url::{Url, WebUrl};
 use crate::{cache::Cache, request};
 use anyhow::{anyhow, Context};
@@ -92,12 +92,11 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
 }
 
 /// Returns the body of a WebUrl, handling potential redirects.
-fn load_web_url(url: &WebUrl) -> anyhow::Result<Option<String>> {
+fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
     let mut request = request::Request::init(RequestMethod::Get, &url.host, true);
     let mut response = request.make(url, None)?;
     let mut status_code = response.status_code();
     let mut num_redirects = 0;
-    let mut body = response.body.clone();
 
     while (300..400).contains(&status_code) && num_redirects < MAX_REDIRECTS {
         let new_url = response
@@ -118,11 +117,10 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Option<String>> {
 
         response = request.make(new_url, None)?;
         status_code = response.status_code();
-        body.clone_from(&response.body);
         num_redirects += 1;
     }
 
-    Ok(body)
+    Ok(response)
 }
 
 #[derive(Debug, Default)]
@@ -131,12 +129,21 @@ pub struct Browser {
 }
 
 impl Browser {
-    fn load_or_get_cached(&self, url: &WebUrl) -> anyhow::Result<Option<String>> {
-        if let Some(response) = self.cache.get(url) {
-            render_optional_body!(response.body)
+    fn maybe_cache_response(&mut self, url: WebUrl, response: Response) -> bool {
+        self.cache
+            .insert(url, response)
+            .inspect_err(|e| eprintln!("Couldn't cache the response: {e}"))
+            .is_ok()
+    }
+
+    fn load_or_get_cached(&mut self, url: &WebUrl) -> anyhow::Result<Option<String>> {
+        if let Some(response) = self.cache.get(url).get() {
+            render_optional_body!(response.as_ref().body)
         } else {
-            let body = load_web_url(url)?;
-            render_optional_body!(body)
+            let response = load_web_url(url)?;
+            let parsed_body = render_optional_body!(&response.body)?;
+            self.maybe_cache_response(url.clone(), response);
+            Ok(parsed_body)
         }
     }
 
