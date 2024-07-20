@@ -1,5 +1,6 @@
 mod browser;
 mod cache;
+mod headers;
 mod request;
 mod url;
 

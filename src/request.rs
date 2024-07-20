@@ -1,5 +1,4 @@
 use std::cell::OnceCell;
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::{Display, Formatter};
 use std::io;
@@ -14,9 +13,8 @@ use flate2::read::GzDecoder;
 use lazy_static::lazy_static;
 use thiserror::Error;
 
+use crate::headers::{Headers, HeadersError, USER_AGENT};
 use crate::url::{Scheme, UrlError, WebUrl};
-
-const USER_AGENT: &str = "Octo";
 
 lazy_static! {
     static ref ROOT_STORE: Arc<rustls::RootCertStore> = Arc::new(rustls::RootCertStore::from_iter(
@@ -27,33 +25,6 @@ lazy_static! {
             .with_root_certificates(ROOT_STORE.clone())
             .with_no_client_auth()
     );
-}
-
-#[derive(Error, Debug)]
-pub(crate) enum RequestError {
-    #[error("invalid scheme for a web URL: {0}")]
-    InvalidScheme(Scheme),
-
-    #[error("can't connect via TCP")]
-    ConnectionFailed(#[from] io::Error),
-}
-
-#[derive(Error, Debug)]
-pub enum ResponseError {
-    #[error("missing status line: {0}")]
-    MissingStatusLine(String),
-
-    #[error("invalid status line: {0}")]
-    InvalidStatusLine(String),
-
-    #[error("failed to parse the status code: {0}")]
-    InvalidStatusCode(#[from] ParseIntError),
-
-    #[error("failed to parse the headers: {0}")]
-    Headers(String),
-
-    #[error("error reading the response stream: {0}")]
-    Stream(#[from] io::Error),
 }
 
 #[derive(Error, Debug)]
@@ -142,6 +113,7 @@ impl ReusableTcpStream {
         Self(OnceCell::new())
     }
 
+    #[allow(clippy::unwrap_used)]
     fn get_mut_or_try_init<F>(&mut self, f: F) -> Result<&mut GenericTcpStream>
     where
         F: FnOnce() -> Result<GenericTcpStream>,
@@ -156,96 +128,19 @@ impl ReusableTcpStream {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct Headers {
-    headers: HashMap<String, Vec<String>>,
-}
+#[derive(Error, Debug)]
+pub(crate) enum RequestError {
+    #[error("invalid scheme for a web URL: {0}")]
+    InvalidScheme(Scheme),
 
-impl Headers {
-    fn add_header_values(&mut self, key: &str, values: &[&str]) {
-        let key = key.to_lowercase();
-
-        // TODO: Check the spec to make sure we actually want to filter out empty strings
-        // from values here.
-        let values = values
-            .iter()
-            .filter_map(|s| {
-                if !s.is_empty() {
-                    Some(s.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        if let Some(existing_values) = self.headers.get_mut(&key) {
-            for value in values {
-                existing_values.push(value.to_string());
-            }
-        } else {
-            self.headers.insert(key, values);
-        }
-    }
-
-    fn add_many(&mut self, kv_pairs: &[(&str, &[&str])]) {
-        for (key, values) in kv_pairs {
-            self.add_header_values(*key, *values);
-        }
-    }
-
-    /// Adds one header key/value pair, where the value is a single header value.
-    /// Example: `add_one_pair("content-encoding", "gzip")`
-    /// **Note:** The header **key** will be converted to lowercase, but the **value** will not.
-    /// Does not perform any deduplication.
-    fn add(&mut self, key: &str, value: &str) {
-        self.add_header_values(key, &[value]);
-    }
-
-    pub fn get(&self, key: &str) -> Option<&Vec<String>> {
-        self.headers.get(key)
-    }
-
-    /// Returns true if `Headers` contains the given header with non-empty values.
-    fn contains(&self, key: &str) -> bool {
-        if let Some(values) = self.headers.get(key) {
-            !values.is_empty()
-        } else {
-            false
-        }
-    }
-
-    /// Returns `Some(true)` if the given header key is associated with the given value,
-    /// `Some(false)` if the given header is not associated with the given value,
-    /// and `None` if the given header is not in `Headers` at all.
-    fn has_value(&self, key: &str, value: &str) -> Option<bool> {
-        self.headers
-            .get(key)
-            .map(|values| values.iter().any(|s| s.as_str() == value))
-    }
-
-    fn from(kv_pairs: &[(&str, &[&str])]) -> Self {
-        let mut headers = Headers::default();
-        headers.add_many(kv_pairs);
-        headers
-    }
-}
-
-impl Display for Headers {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut s = String::new();
-        for (key, values) in &self.headers {
-            let values = values.join(", ");
-            s.push_str(format!("{key}: {values}\r\n").as_str());
-        }
-        write!(f, "{s}")
-    }
+    #[error("can't connect via TCP")]
+    ConnectionFailed(#[from] io::Error),
 }
 
 #[derive(Debug)]
 pub(crate) struct Request {
     method: RequestMethod,
     headers: Headers,
-    // TODO: Switch to &WebUrl to avoid taking ownership/cloning?
     stream: ReusableTcpStream,
     keep_alive: bool,
 }
@@ -311,7 +206,7 @@ impl Request {
 
 impl Request {
     /// Convenience method to make a GET request
-    /// to the given URL with the defaylt `User-Agent`
+    /// to the given URL with the default `User-Agent`,
     /// and return the resulting `Response` or error.
     pub(crate) fn get(url: &WebUrl) -> Result<Response> {
         let mut request = Self::new(RequestMethod::Get, &url.host, false)
@@ -355,6 +250,27 @@ fn decompress_gzip(bytes: &[u8]) -> Result<String, ResponseError> {
     Ok(string)
 }
 
+#[derive(Error, Debug)]
+pub enum ResponseError {
+    #[error("missing status line: {0}")]
+    MissingStatusLine(String),
+
+    #[error("invalid status line: {0}")]
+    InvalidStatusLine(String),
+
+    #[error("failed to parse the status code: {0}")]
+    InvalidStatusCode(#[from] ParseIntError),
+
+    #[error("failed to parse the headers: {0}")]
+    ParseHeaders(String),
+
+    #[error("invalid headers: {0}")]
+    InvalidHeaders(#[from] HeadersError),
+
+    #[error("error reading the response stream: {0}")]
+    Stream(#[from] io::Error),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Response {
     status_line: StatusLine,
@@ -369,7 +285,6 @@ impl Response {
         reader.read_line(&mut status_line)?;
         let status_line = status_line.parse::<StatusLine>()?;
 
-        // TODO: Support multiple header values for the same header key
         let mut headers = Headers::default();
         let mut current_line = String::new();
 
@@ -381,22 +296,27 @@ impl Response {
 
             let (header, values) = current_line
                 .split_once(':')
-                .ok_or_else(|| ResponseError::Headers(current_line.clone()))?;
+                .ok_or_else(|| ResponseError::ParseHeaders(current_line.clone()))?;
             let values = values.split(',').map(|s| s.trim()).collect::<Vec<_>>();
             headers.add_header_values(header, &values);
             current_line.clear();
         }
 
+        dbg!(&headers);
+
+        // The two transposes here are a bit awkward, but they help us deal
+        // with the whole Option<Result> thing and make sure
+        // we handle the errors from both not having a content-length header at all,
+        // and not having a valid value for the content-length.
         let content_length = headers
-            .get("content-length")
-            .and_then(|values| values.get(0))
+            .get_single_value("content-length")
+            .transpose()?
             .map(|s| s.parse::<usize>())
             .transpose()?
             .unwrap_or(0);
 
         let mut buf = Vec::with_capacity(content_length);
 
-        // let mut body_buf = String::with_capacity(content_length);
         let mut bytes_read = 0;
         while bytes_read < content_length {
             let new_bytes_read = reader.read(&mut buf)?;
@@ -442,25 +362,29 @@ mod tests {
     use crate::url::Url;
 
     #[test]
-    fn close() {
-        let url = "http://example.com".parse::<Url>().unwrap();
-        let response = Request::get(url.as_web_url().unwrap()).unwrap();
+    fn close() -> Result<()> {
+        let url = "http://example.com".parse::<Url>()?;
+        #[allow(clippy::unwrap_used)]
+        let response = Request::get(url.as_web_url().unwrap())?;
         assert!(response.body.is_some());
+        Ok(())
     }
 
-    fn test_url_keepalive(url: &str) {
-        let url = url.parse::<Url>().unwrap();
+    fn test_url_keepalive(url: &str) -> Result<()> {
+        let url = url.parse::<Url>()?;
+        #[allow(clippy::unwrap_used)]
         let url = url.as_web_url().unwrap();
 
         let mut request = Request::new(RequestMethod::Get, &url.host, true);
-        let first_response = request.make(url, None).unwrap();
+        let first_response = request.make(url, None)?;
         assert!(first_response.body.is_some());
-        let second_response = request.make(url, None).unwrap();
+        let second_response = request.make(url, None)?;
         assert_eq!(first_response, second_response);
 
-        let one_off_response = Request::get(url).unwrap();
+        let one_off_response = Request::get(url)?;
         assert_eq!(first_response.body, one_off_response.body);
         assert_eq!(second_response.body, one_off_response.body);
+        Ok(())
     }
 
     #[test]
