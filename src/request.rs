@@ -297,14 +297,13 @@ impl Response {
             let (header, values) = current_line
                 .split_once(':')
                 .ok_or_else(|| ResponseError::ParseHeaders(current_line.clone()))?;
-            let values = values.split(',').map(|s| s.trim()).collect::<Vec<_>>();
-            headers.add_header_values(header, &values);
+            headers.add(header, values.trim());
             current_line.clear();
         }
 
         dbg!(&headers);
 
-        // The two transposes here are a bit awkward, but they help us deal
+        // The two calls to transpose here are a bit awkward, but they help us deal
         // with the whole Option<Result> thing and make sure
         // we handle the errors from both not having a content-length header at all,
         // and not having a valid value for the content-length.
@@ -315,18 +314,24 @@ impl Response {
             .transpose()?
             .unwrap_or(0);
 
-        let mut buf = Vec::with_capacity(content_length);
-
+        let mut buf = vec![0u8; content_length];
         let mut bytes_read = 0;
         while bytes_read < content_length {
             let new_bytes_read = reader.read(&mut buf)?;
             if new_bytes_read == 0 {
+                if !reader.buffer().is_empty() {
+                    eprintln!(
+                        "Got no new bytes, but buffer still has {} bytes left",
+                        reader.buffer().len()
+                    );
+                }
                 break;
             }
             bytes_read += new_bytes_read;
         }
+
         let body = if !buf.is_empty() {
-            let body = if headers.has_value("content-encoding", "gzip") == Some(true) {
+            let body = if headers.has_given_value("content-encoding", "gzip") == Some(true) {
                 decompress_gzip(&buf)?
             } else {
                 String::from_utf8_lossy(&buf).to_string()
@@ -388,12 +393,12 @@ mod tests {
     }
 
     #[test]
-    fn keep_alive() {
-        test_url_keepalive("http://example.com");
+    fn keep_alive() -> Result<()> {
+        test_url_keepalive("http://example.com")
     }
 
     #[test]
-    fn keep_alive_http() {
-        test_url_keepalive("https://example.com");
+    fn keep_alive_http() -> Result<()> {
+        test_url_keepalive("https://example.com")
     }
 }

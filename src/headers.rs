@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
-use chrono::{DateTime, FixedOffset};
 use thiserror::Error;
 
 pub const USER_AGENT: &str = "Octo";
@@ -12,21 +11,13 @@ pub enum HeadersError {
     NotOneValue(usize),
 }
 
-#[derive(Debug, Clone)]
-enum HeaderValue {
-    ContentType(String),
-    CacheControl(String),
-    Date(DateTime<FixedOffset>),
-    UserAgent(String),
-}
-
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Headers {
     headers: HashMap<String, Vec<String>>,
 }
 
 impl Headers {
-    fn add_header_values(&mut self, key: &str, values: &[&str]) {
+    pub(crate) fn add_header_values(&mut self, key: &str, values: &[&str]) {
         let key = key.to_lowercase();
 
         // TODO: Check the spec to make sure we actually want to filter out empty strings
@@ -51,7 +42,7 @@ impl Headers {
         }
     }
 
-    fn add_many(&mut self, kv_pairs: &[(&str, &[&str])]) {
+    pub(crate) fn add_many(&mut self, kv_pairs: &[(&str, &[&str])]) {
         for (key, values) in kv_pairs {
             self.add_header_values(key, values);
         }
@@ -61,7 +52,7 @@ impl Headers {
     /// Example: `add_one_pair("content-encoding", "gzip")`
     /// **Note:** The header **key** will be converted to lowercase, but the **value** will not.
     /// Does not perform any deduplication.
-    fn add(&mut self, key: &str, value: &str) {
+    pub(crate) fn add(&mut self, key: &str, value: &str) {
         self.add_header_values(key, &[value]);
     }
 
@@ -104,13 +95,13 @@ impl Headers {
     /// Returns `Some(true)` if the given header key is associated with the given value,
     /// `Some(false)` if the given header is not associated with the given value,
     /// and `None` if the given header is not in `Headers` at all.
-    fn has_value(&self, key: &str, value: &str) -> Option<bool> {
+    pub(crate) fn has_given_value(&self, key: &str, value: &str) -> Option<bool> {
         self.headers
             .get(key)
             .map(|values| values.iter().any(|s| s.as_str() == value))
     }
 
-    pub fn from(kv_pairs: &[(&str, &[&str])]) -> Self {
+    pub(crate) fn from(kv_pairs: &[(&str, &[&str])]) -> Self {
         let mut headers = Headers::default();
         headers.add_many(kv_pairs);
         headers
