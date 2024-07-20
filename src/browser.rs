@@ -104,7 +104,12 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
             .get("location")
             .ok_or_else(|| anyhow!("Missing Location header in {response:?}"))?
             .first()
-            .ok_or_else(|| anyhow!("Missing Location value in response headers: {response:?}"))?;
+            .ok_or_else(|| {
+                anyhow!(
+                    "Missing Location value in response headers: {:?}",
+                    response.headers
+                )
+            })?;
 
         let new_url = if new_url.starts_with('/') {
             Url::Web(url.with_path(new_url))
