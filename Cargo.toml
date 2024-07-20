@@ -14,3 +14,4 @@ webpki-roots = "0.26.3"
 
 [lints.clippy]
 unwrap_used = "deny"
+dbg_macro = "deny"
