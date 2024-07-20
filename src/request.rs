@@ -146,15 +146,17 @@ pub(crate) struct Request {
 }
 
 impl Request {
-    pub(crate) fn new(method: RequestMethod, host: &str, keep_alive: bool) -> Self {
+    pub(crate) fn new(method: RequestMethod, host: &str, keep_alive: bool, gzip: bool) -> Self {
         let connection_value = if keep_alive { "keep-alive" } else { "close" };
+        let mut headers = Headers::from(&[("Host", &[host]), ("Connection", &[connection_value])]);
+
+        if gzip {
+            headers.add("Accept-Encoding", "gzip")
+        }
+
         Self {
             method,
-            headers: Headers::from(&[
-                ("Host", &[host]),
-                ("Connection", &[connection_value]),
-                ("Accept-Encoding", &["gzip"]),
-            ]),
+            headers,
             stream: ReusableTcpStream::new(),
             keep_alive,
         }
@@ -194,13 +196,7 @@ impl Request {
         })?;
         stream.write_all(self_string.as_bytes())?;
 
-        if self.keep_alive {
-            Ok(Response::from_stream(stream)?)
-        } else {
-            let mut response_data = String::new();
-            stream.read_to_string(&mut response_data)?;
-            Ok(response_data.parse::<Response>()?)
-        }
+        Ok(Response::from_stream(stream)?)
     }
 }
 
@@ -209,7 +205,7 @@ impl Request {
     /// to the given URL with the default `User-Agent`,
     /// and return the resulting `Response` or error.
     pub(crate) fn get(url: &WebUrl) -> Result<Response> {
-        let mut request = Self::new(RequestMethod::Get, &url.host, false)
+        let mut request = Self::new(RequestMethod::Get, &url.host, false, true)
             .with_extra_headers(&[("User-Agent", &[USER_AGENT])]);
         request.make(url, None)
     }
@@ -271,36 +267,35 @@ pub enum ResponseError {
     Stream(#[from] io::Error),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Response {
-    status_line: StatusLine,
-    pub headers: Headers,
-    pub body: Option<String>,
+#[inline]
+fn read_chunked(reader: &mut BufReader<&mut impl Read>) -> Result<Vec<u8>, ResponseError> {
+    let mut current_chunk_len_line = String::new();
+    let mut response_body = vec![];
+    loop {
+        // Read the chunk length.
+        reader.read_line(&mut current_chunk_len_line)?;
+        let chunk_len = current_chunk_len_line.trim().parse::<usize>()?;
+
+        if chunk_len > 0 {
+            let mut chunk_buf = vec![0; chunk_len];
+            let bytes_read = reader.read(&mut chunk_buf)?;
+            assert_eq!(bytes_read, chunk_len);
+            response_body.append(&mut chunk_buf);
+        } else {
+            break;
+        }
+    }
+    Ok(response_body)
 }
 
-impl Response {
-    fn from_stream(stream: &mut impl Read) -> Result<Self, ResponseError> {
-        let mut reader = BufReader::new(stream);
-        let mut status_line = String::new();
-        reader.read_line(&mut status_line)?;
-        let status_line = status_line.parse::<StatusLine>()?;
-
-        let mut headers = Headers::default();
-        let mut current_line = String::new();
-
-        loop {
-            reader.read_line(&mut current_line)?;
-            if current_line.as_str() == "\r\n" {
-                break;
-            }
-
-            let (header, values) = current_line
-                .split_once(':')
-                .ok_or_else(|| ResponseError::ParseHeaders(current_line.clone()))?;
-            headers.add(header, values.trim());
-            current_line.clear();
-        }
-
+#[inline]
+fn read_body(
+    reader: &mut BufReader<&mut impl Read>,
+    headers: &Headers,
+) -> Result<Option<String>, ResponseError> {
+    let buf = if headers.has_given_value("transfer-encoding", "chunked") == Some(true) {
+        read_chunked(reader)?
+    } else {
         // The two calls to transpose here are a bit awkward, but they help us deal
         // with the whole Option<Result> thing and make sure
         // we handle the errors from both not having a content-length header at all,
@@ -328,18 +323,52 @@ impl Response {
             bytes_read += new_bytes_read;
         }
 
-        dbg!(&headers);
+        buf
+    };
 
-        let body = if !buf.is_empty() {
-            let body = if headers.has_given_value("content-encoding", "gzip") == Some(true) {
-                decompress_gzip(&buf)?
-            } else {
-                String::from_utf8_lossy(&buf).to_string()
-            };
-            Some(body)
+    if !buf.is_empty() {
+        let body = if headers.has_given_value("content-encoding", "gzip") == Some(true) {
+            decompress_gzip(&buf)?
         } else {
-            None
+            String::from_utf8_lossy(&buf).to_string()
         };
+        Ok(Some(body))
+    } else {
+        Ok(None)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Response {
+    status_line: StatusLine,
+    pub headers: Headers,
+    pub body: Option<String>,
+}
+
+impl Response {
+    fn from_stream(stream: &mut impl Read) -> Result<Self, ResponseError> {
+        let mut reader = BufReader::new(stream);
+        let mut status_line = String::new();
+        reader.read_line(&mut status_line)?;
+        let status_line = status_line.parse::<StatusLine>()?;
+
+        let mut current_line = String::new();
+        let mut headers = Headers::default();
+
+        loop {
+            reader.read_line(&mut current_line)?;
+            if current_line.as_str() == "\r\n" {
+                break;
+            }
+
+            let (header, values) = current_line
+                .split_once(':')
+                .ok_or_else(|| ResponseError::ParseHeaders(current_line.clone()))?;
+            headers.add(header, values.trim());
+            current_line.clear();
+        }
+
+        let body = read_body(&mut reader, &headers)?;
 
         Ok(Self {
             status_line,
@@ -372,6 +401,11 @@ mod tests {
         #[allow(clippy::unwrap_used)]
         let response = Request::get(url.as_web_url().unwrap())?;
         assert!(response.body.is_some());
+
+        let url = "https://browser.engineering/http.html".parse::<Url>()?;
+        #[allow(clippy::unwrap_used)]
+        let response = Request::get(url.as_web_url().unwrap())?;
+        assert!(response.body.is_some());
         Ok(())
     }
 
@@ -380,7 +414,7 @@ mod tests {
         #[allow(clippy::unwrap_used)]
         let url = url.as_web_url().unwrap();
 
-        let mut request = Request::new(RequestMethod::Get, &url.host, true);
+        let mut request = Request::new(RequestMethod::Get, &url.host, true, true);
         let first_response = request.make(url, None)?;
         assert!(first_response.body.is_some());
         let second_response = request.make(url, None)?;
@@ -394,11 +428,31 @@ mod tests {
 
     #[test]
     fn keep_alive() -> Result<()> {
-        test_url_keepalive("http://example.com")
+        test_url_keepalive("http://example.com")?;
+        test_url_keepalive("http://browser.engineering/http.html")
     }
 
     #[test]
-    fn keep_alive_http() -> Result<()> {
-        test_url_keepalive("https://example.com")
+    fn keep_alive_https() -> Result<()> {
+        test_url_keepalive("https://example.com")?;
+        test_url_keepalive("https://browser.engineering/http.html")
+    }
+
+    #[test]
+    fn gzipped_matches_uncompressed() -> Result<()> {
+        let url = "https://browser.engineering/http.html".parse::<Url>()?;
+        #[allow(clippy::unwrap_used)]
+        let url = url.as_web_url().unwrap();
+
+        let mut request_uncompressed =
+            Request::new(RequestMethod::Get, url.host.as_str(), true, false);
+        let response_uncompressed = request_uncompressed.make(url, None)?;
+
+        let mut request_compressed =
+            Request::new(RequestMethod::Get, url.host.as_str(), true, true);
+        let response_compressed = request_compressed.make(url, None)?;
+
+        assert_eq!(response_compressed.body, response_uncompressed.body);
+        Ok(())
     }
 }
