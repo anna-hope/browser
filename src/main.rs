@@ -16,7 +16,7 @@ pub fn show(url: &str, browser: &mut Browser) -> Result<()> {
 fn main() -> Result<()> {
     let mut browser = Browser::default();
     let url = env::args().nth(1).unwrap_or_else(|| {
-        let current_dir = env::current_dir().unwrap();
+        let current_dir = env::current_dir().expect("Failed to get current working directory");
         format!("file://{}/LICENSE", current_dir.to_string_lossy())
     });
     show(&url, &mut browser)
