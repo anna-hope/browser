@@ -23,24 +23,21 @@ impl ResponseWithCacheProperties {
     fn parse_cache_properties(response: &Response) -> Result<ResponseCacheProperties> {
         let headers = &response.headers;
 
-        // This feels kind of unhinged.
         let date = headers
-            .get("date")
-            .ok_or_else(|| anyhow!("Missing date in headers"))
-            .map(|values| values.first().ok_or_else(|| anyhow!("No value for date")))?
+            .get_single_value("date")
+            .ok_or_else(|| anyhow!("Missing date in headers"))?
             .map(|s| DateTime::parse_from_rfc2822(s.as_str()))??;
 
-        let max_age =
-            if let Some(Some(cache_control)) = headers.get("cache-control").map(|v| v.first()) {
-                let max_age = cache_control
-                    .strip_prefix("max-age=")
-                    .ok_or_else(|| anyhow!("Invalid value for cache-control: {cache_control}"))?;
-                let max_age = max_age.parse::<u64>().map(Duration::from_secs)?;
+        let max_age = if let Some(Ok(cache_control)) = headers.get_single_value("cache-control") {
+            let max_age = cache_control
+                .strip_prefix("max-age=")
+                .ok_or_else(|| anyhow!("Invalid value for cache-control: {cache_control}"))?;
+            let max_age = max_age.parse::<u64>().map(Duration::from_secs)?;
 
-                TimeDelta::from_std(max_age)?
-            } else {
-                return Err(anyhow!("No cache-control header/value: {headers:?}"));
-            };
+            TimeDelta::from_std(max_age)?
+        } else {
+            return Err(anyhow!("No cache-control header/value: {headers:?}"));
+        };
 
         Ok((date, max_age))
     }
