@@ -27,16 +27,11 @@ impl ResponseWithCacheProperties {
         let date = headers
             .get("date")
             .ok_or_else(|| anyhow!("Missing date in headers"))
-            .map(|values| {
-                values
-                    .get(0)
-                    .ok_or_else(|| anyhow!("No value for date"))
-                    .map(|s| s.as_str())
-            })?
-            .map(|s| DateTime::parse_from_rfc2822(s))??;
+            .map(|values| values.first().ok_or_else(|| anyhow!("No value for date")))?
+            .map(|s| DateTime::parse_from_rfc2822(s.as_str()))??;
 
         let max_age =
-            if let Some(Some(cache_control)) = headers.get("cache-control").map(|v| v.get(0)) {
+            if let Some(Some(cache_control)) = headers.get("cache-control").map(|v| v.first()) {
                 let max_age = cache_control
                     .strip_prefix("max-age=")
                     .ok_or_else(|| anyhow!("Invalid value for cache-control: {cache_control}"))?;
@@ -44,7 +39,7 @@ impl ResponseWithCacheProperties {
 
                 TimeDelta::from_std(max_age)?
             } else {
-                return Err(anyhow!("No cache-control header: {headers:?}"));
+                return Err(anyhow!("No cache-control header/value: {headers:?}"));
             };
 
         Ok((date, max_age))
