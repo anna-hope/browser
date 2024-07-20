@@ -153,7 +153,7 @@ impl Request {
             headers: Headers::from(&[
                 ("Host", &[host]),
                 ("Connection", &[connection_value]),
-                ("Compression", &["gzip"]),
+                ("Accept-Encoding", &["gzip"]),
             ]),
             stream: ReusableTcpStream::new(),
             keep_alive,
@@ -301,8 +301,6 @@ impl Response {
             current_line.clear();
         }
 
-        dbg!(&headers);
-
         // The two calls to transpose here are a bit awkward, but they help us deal
         // with the whole Option<Result> thing and make sure
         // we handle the errors from both not having a content-length header at all,
@@ -329,6 +327,8 @@ impl Response {
             }
             bytes_read += new_bytes_read;
         }
+
+        dbg!(&headers);
 
         let body = if !buf.is_empty() {
             let body = if headers.has_given_value("content-encoding", "gzip") == Some(true) {
