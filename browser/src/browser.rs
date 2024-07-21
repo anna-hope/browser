@@ -1,8 +1,10 @@
-use crate::request::{RequestMethod, Response};
-use crate::url::{Url, WebUrl};
-use crate::{cache::Cache, request};
-use anyhow::{anyhow, Context};
 use std::fs;
+
+use anyhow::{anyhow, Context};
+
+use octo_http::cache::Cache;
+use octo_http::request::{Request, RequestMethod, Response};
+use octo_http::url::{Url, WebUrl};
 
 // TODO: Check what real browsers set this to.
 const MAX_REDIRECTS: u8 = 5;
@@ -93,7 +95,7 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
 
 /// Returns the body of a WebUrl, handling potential redirects.
 fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
-    let mut request = request::Request::new(RequestMethod::Get, &url.host, true, true);
+    let mut request = Request::new(RequestMethod::Get, &url.host, true, true);
     let mut response = request.make(url, None)?;
     let mut status_code = response.status_code();
     let mut num_redirects = 0;
@@ -166,7 +168,7 @@ impl Browser {
             }
             Url::Data(url) => Ok(Some(url.data)),
             Url::ViewSource(url) => {
-                let response = request::Request::get(&url)?;
+                let response = Request::get(&url)?;
                 parse_optional_body!(response.body, false)
             }
         }
@@ -193,7 +195,8 @@ mod tests {
 
     #[test]
     fn load_file() -> Result<()> {
-        let project_root = env::current_dir().expect("Can't get current directory.");
+        let current_dir = env::current_dir().expect("Can't get current directory.");
+        let project_root = current_dir.parent().expect("Can't get parent directory");
         Browser::default()
             .load(format!("file://{}/LICENSE", project_root.to_string_lossy()).as_str())?;
         Ok(())
