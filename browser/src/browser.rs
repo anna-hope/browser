@@ -34,6 +34,7 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
     let mut skip_entity = false;
 
     let mut result = String::new();
+    // TODO: Think of a way of getting all the graphemes without allocating another Vec
     let graphemes = UnicodeSegmentation::graphemes(body, true).collect::<Vec<_>>();
 
     let mut current_index = 0;
