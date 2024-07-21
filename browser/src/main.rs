@@ -3,7 +3,7 @@ use std::env;
 use anyhow::Result;
 use octo_engine::Engine;
 
-pub fn show(url: &str, engine: &mut Engine) -> Result<()> {
+fn show(url: &str, engine: &mut Engine) -> Result<()> {
     let body = engine.load(url)?;
     if let Some(body) = body {
         println!("{body}");
