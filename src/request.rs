@@ -175,7 +175,7 @@ impl Request {
     fn make_string(&self, url: &WebUrl, _body: Option<&str>) -> String {
         let mut string = format!("{} {} HTTP/1.1\r\n", self.method, url.path);
         string.push_str(self.headers.to_string().as_str());
-        // TODO add body
+        // TODO: add body
         string.push_str("\r\n");
         string
     }
@@ -239,7 +239,7 @@ impl FromStr for StatusLine {
 }
 
 #[inline]
-fn decompress_gzip(bytes: &[u8]) -> Result<String, ResponseError> {
+fn decompress_gzip(bytes: impl Read) -> Result<String, ResponseError> {
     let mut gz = GzDecoder::new(bytes);
     let mut string = String::new();
     gz.read_to_string(&mut string)?;
@@ -274,16 +274,18 @@ fn read_chunked(reader: &mut BufReader<&mut impl Read>) -> Result<Vec<u8>, Respo
     loop {
         // Read the chunk length.
         reader.read_line(&mut current_chunk_len_line)?;
-        let chunk_len = current_chunk_len_line.trim().parse::<usize>()?;
+        let chunk_len = usize::from_str_radix(current_chunk_len_line.trim(), 16)?;
 
         if chunk_len > 0 {
             let mut chunk_buf = vec![0; chunk_len];
-            let bytes_read = reader.read(&mut chunk_buf)?;
-            assert_eq!(bytes_read, chunk_len);
+            reader.read_exact(&mut chunk_buf)?;
             response_body.append(&mut chunk_buf);
+            // Skip the newline at the end
+            reader.read_line(&mut current_chunk_len_line)?;
         } else {
             break;
         }
+        current_chunk_len_line.clear();
     }
     Ok(response_body)
 }
@@ -308,27 +310,28 @@ fn read_body(
             .unwrap_or(0);
 
         let mut buf = vec![0u8; content_length];
-        let mut bytes_read = 0;
-        while bytes_read < content_length {
-            let new_bytes_read = reader.read(&mut buf)?;
-            if new_bytes_read == 0 {
-                if !reader.buffer().is_empty() {
-                    eprintln!(
-                        "Got no new bytes, but buffer still has {} bytes left",
-                        reader.buffer().len()
-                    );
-                }
-                break;
-            }
-            bytes_read += new_bytes_read;
-        }
+        reader.read_exact(&mut buf)?;
+        // let mut bytes_read = 0;
+        // while bytes_read < content_length {
+        //     let new_bytes_read = reader.read(&mut buf)?;
+        //     if new_bytes_read == 0 {
+        //         if !reader.buffer().is_empty() {
+        //             eprintln!(
+        //                 "Got no new bytes, but buffer still has {} bytes left",
+        //                 reader.buffer().len()
+        //             );
+        //         }
+        //         break;
+        //     }
+        //     bytes_read += new_bytes_read;
+        // }
 
         buf
     };
 
     if !buf.is_empty() {
         let body = if headers.has_given_value("content-encoding", "gzip") == Some(true) {
-            decompress_gzip(&buf)?
+            decompress_gzip(buf.as_slice())?
         } else {
             String::from_utf8_lossy(&buf).to_string()
         };
