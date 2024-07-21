@@ -127,6 +127,7 @@ impl FromStr for Url {
                     (new_host, port_str.parse::<u16>()?)
                 } else {
                     // Http and Https are guaranteed to have a default port, so safe to unwrap.
+                    #[allow(clippy::unwrap_used)]
                     (host, scheme.default_port().unwrap())
                 };
                 Ok(Self::Web(WebUrl {

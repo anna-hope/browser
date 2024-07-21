@@ -22,12 +22,13 @@ struct ResponseWithCacheProperties {
 impl ResponseWithCacheProperties {
     fn parse_cache_properties(response: &Response) -> Result<ResponseCacheProperties> {
         let headers = &response.headers;
+
         let date = headers
-            .get("date")
-            .ok_or_else(|| anyhow!("Missing date in headers"))
+            .get_single_value("date")
+            .ok_or_else(|| anyhow!("Missing date in headers"))?
             .map(|s| DateTime::parse_from_rfc2822(s.as_str()))??;
 
-        let max_age = if let Some(cache_control) = headers.get("cache-control") {
+        let max_age = if let Some(Ok(cache_control)) = headers.get_single_value("cache-control") {
             let max_age = cache_control
                 .strip_prefix("max-age=")
                 .ok_or_else(|| anyhow!("Invalid value for cache-control: {cache_control}"))?;
@@ -35,7 +36,7 @@ impl ResponseWithCacheProperties {
 
             TimeDelta::from_std(max_age)?
         } else {
-            return Err(anyhow!("No cache-control header: {headers:?}"));
+            return Err(anyhow!("No cache-control header/value: {headers:?}"));
         };
 
         Ok((date, max_age))
@@ -104,23 +105,19 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = (String, &'a str);
+    type Item = (String, String);
 
     fn next(&mut self) -> Option<Self::Item> {
         let (url, response) = self.base.next()?;
         let url = url.to_string();
         // TODO: Replace with some reasonable representation of the response.
-        let response_string = response
-            .response
-            .headers
-            .get("cache-control")
-            .map(|s| s.as_str())?;
+        let response_string = response.response.headers.to_string();
         Some((url, response_string))
     }
 }
 
 impl<'a> IntoIterator for &'a Cache {
-    type Item = (String, &'a str);
+    type Item = (String, String);
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
