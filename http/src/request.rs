@@ -1,5 +1,4 @@
 use std::cell::OnceCell;
-use std::convert::TryInto;
 use std::fmt::{Display, Formatter};
 use std::io;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -14,7 +13,7 @@ use lazy_static::lazy_static;
 use thiserror::Error;
 
 use crate::headers::{Headers, HeadersError, USER_AGENT};
-use crate::url::{Scheme, UrlError, WebUrl};
+use octo_url::{Scheme, UrlError, WebUrl};
 
 lazy_static! {
     static ref ROOT_STORE: Arc<rustls::RootCertStore> = Arc::new(rustls::RootCertStore::from_iter(
@@ -394,7 +393,7 @@ impl FromStr for Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::url::Url;
+    use octo_url::Url;
 
     #[test]
     fn close() -> Result<()> {

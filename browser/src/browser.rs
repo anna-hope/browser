@@ -5,7 +5,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use octo_http::cache::Cache;
 use octo_http::request::{Request, RequestMethod, Response};
-use octo_http::url::{Url, WebUrl};
+use octo_url::{Url, WebUrl};
 
 // TODO: Check what real browsers set this to.
 const MAX_REDIRECTS: u8 = 5;
