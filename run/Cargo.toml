@@ -1,0 +1,11 @@
+[package]
+name = "octo-runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+octo-browser = { path = "../browser" }
+
+[lints]
+workspace = true

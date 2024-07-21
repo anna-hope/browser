@@ -1,7 +1,7 @@
 use std::env;
 
 use anyhow::Result;
-use browser::Browser;
+use octo_browser::Browser;
 
 pub fn show(url: &str, browser: &mut Browser) -> Result<()> {
     let body = browser.load(url)?;

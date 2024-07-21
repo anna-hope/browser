@@ -1,0 +1,12 @@
+[package]
+name = "octo-browser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+octo-http = { path = "../http" }
+
+[lints]
+workspace = true

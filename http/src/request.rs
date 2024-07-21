@@ -44,7 +44,7 @@ pub(crate) enum NetworkError {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum RequestMethod {
+pub enum RequestMethod {
     Get,
 }
 
@@ -138,14 +138,14 @@ pub(crate) enum RequestError {
 }
 
 #[derive(Debug)]
-pub(crate) struct Request {
+pub struct Request {
     method: RequestMethod,
     headers: Headers,
     stream: ReusableTcpStream,
 }
 
 impl Request {
-    pub(crate) fn new(method: RequestMethod, host: &str, keep_alive: bool, gzip: bool) -> Self {
+    pub fn new(method: RequestMethod, host: &str, keep_alive: bool, gzip: bool) -> Self {
         let connection_value = if keep_alive { "keep-alive" } else { "close" };
         let mut headers = Headers::from(&[("Host", &[host]), ("Connection", &[connection_value])]);
 
@@ -178,7 +178,7 @@ impl Request {
         string
     }
 
-    pub(crate) fn make(&mut self, url: &WebUrl, body: Option<&str>) -> Result<Response> {
+    pub fn make(&mut self, url: &WebUrl, body: Option<&str>) -> Result<Response> {
         if !matches!(url.scheme, Scheme::Http) && !matches!(url.scheme, Scheme::Https) {
             return Err(RequestError::InvalidScheme(url.scheme).into());
         }
@@ -202,7 +202,7 @@ impl Request {
     /// Convenience method to make a GET request
     /// to the given URL with the default `User-Agent`,
     /// and return the resulting `Response` or error.
-    pub(crate) fn get(url: &WebUrl) -> Result<Response> {
+    pub fn get(url: &WebUrl) -> Result<Response> {
         let mut request = Self::new(RequestMethod::Get, &url.host, false, true)
             .with_extra_headers(&[("User-Agent", &[USER_AGENT])]);
         request.make(url, None)
@@ -378,7 +378,7 @@ impl Response {
         })
     }
 
-    pub(crate) fn status_code(&self) -> u16 {
+    pub fn status_code(&self) -> u16 {
         self.status_line.status_code
     }
 }

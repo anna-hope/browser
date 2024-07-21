@@ -68,7 +68,7 @@ impl Display for Scheme {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Url {
+pub enum Url {
     Web(WebUrl),
     File(FileUrl),
     Data(DataUrl),
@@ -76,7 +76,7 @@ pub(crate) enum Url {
 }
 
 impl Url {
-    pub(crate) fn as_web_url(&self) -> Option<&WebUrl> {
+    pub fn as_web_url(&self) -> Option<&WebUrl> {
         match self {
             Self::Web(url) => Some(url),
             _ => None,
@@ -159,7 +159,7 @@ pub struct WebUrl {
 impl WebUrl {
     /// Convenience method to construct a new URL with the given path
     /// (useful for relative URLs, e.g. in redirects).
-    pub(crate) fn with_path(&self, path: &str) -> Self {
+    pub fn with_path(&self, path: &str) -> Self {
         Self {
             scheme: self.scheme,
             host: self.host.clone(),
@@ -181,7 +181,7 @@ impl Display for WebUrl {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub(crate) struct FileUrl {
+pub struct FileUrl {
     pub scheme: Scheme,
     pub path: String,
     pub host: String,
@@ -189,7 +189,7 @@ pub(crate) struct FileUrl {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub(crate) struct DataUrl {
+pub struct DataUrl {
     pub scheme: Scheme,
     // TODO: Use enumerated mimetypes instead of String
     pub mimetype: String,
@@ -214,7 +214,7 @@ impl FromStr for DataUrl {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use anyhow::{anyhow, Result};
 
