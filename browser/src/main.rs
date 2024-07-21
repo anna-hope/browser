@@ -1,10 +1,10 @@
 use std::env;
 
 use anyhow::Result;
-use octo_browser::Browser;
+use octo_engine::Engine;
 
-pub fn show(url: &str, browser: &mut Browser) -> Result<()> {
-    let body = browser.load(url)?;
+pub fn show(url: &str, engine: &mut Engine) -> Result<()> {
+    let body = engine.load(url)?;
     if let Some(body) = body {
         println!("{body}");
     } else {
@@ -14,10 +14,10 @@ pub fn show(url: &str, browser: &mut Browser) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let mut browser = Browser::default();
+    let mut engine = Engine::default();
     let url = env::args().nth(1).unwrap_or_else(|| {
         let current_dir = env::current_dir().expect("Failed to get current working directory");
         format!("file://{}/LICENSE", current_dir.to_string_lossy())
     });
-    show(&url, &mut browser)
+    show(&url, &mut engine)
 }
