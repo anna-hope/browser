@@ -81,6 +81,7 @@ impl Cache {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn remove(&mut self, url: &WebUrl) -> Option<Response> {
         self.cache
             .remove(url)
