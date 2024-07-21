@@ -1,14 +1,11 @@
 [package]
-name = "octo-browser"
+name = "octo-url"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-octo-http = { path = "../http" }
-octo-url = { path = "../url" }
-unicode-segmentation = "1.11.0"
 
 [lints]
 workspace = true

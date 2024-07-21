@@ -427,6 +427,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "octo-http",
+ "octo-url",
  "thiserror",
  "unicode-segmentation",
 ]
@@ -439,6 +440,7 @@ dependencies = [
  "chrono",
  "flate2",
  "lazy_static",
+ "octo-url",
  "rustls",
  "thiserror",
  "webpki-roots",
@@ -450,6 +452,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "octo-browser",
+]
+
+[[package]]
+name = "octo-url"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "thiserror",
 ]
 
 [[package]]

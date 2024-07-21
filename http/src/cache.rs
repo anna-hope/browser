@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, FixedOffset, Local, TimeDelta};
 
 use crate::request::Response;
-use crate::url::WebUrl;
+use octo_url::WebUrl;
 
 type ResponseCacheProperties = (DateTime<FixedOffset>, TimeDelta);
 
