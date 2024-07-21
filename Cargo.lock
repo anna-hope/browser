@@ -426,6 +426,14 @@ name = "octo-browser"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "octo-engine",
+]
+
+[[package]]
+name = "octo-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "octo-http",
  "octo-url",
  "thiserror",
@@ -444,14 +452,6 @@ dependencies = [
  "rustls",
  "thiserror",
  "webpki-roots",
-]
-
-[[package]]
-name = "octo-runner"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "octo-browser",
 ]
 
 [[package]]

@@ -5,10 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-thiserror = { workspace = true }
-octo-http = { path = "../http" }
-octo-url = { path = "../url" }
-unicode-segmentation = "1.11.0"
+octo-engine = { path = "../engine" }
 
 [lints]
 workspace = true

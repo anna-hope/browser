@@ -135,11 +135,11 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
 }
 
 #[derive(Debug, Default)]
-pub struct Browser {
+pub struct Engine {
     cache: Cache,
 }
 
-impl Browser {
+impl Engine {
     fn maybe_cache_response(&mut self, url: WebUrl, response: Response) -> bool {
         self.cache
             .insert(url, response)
@@ -185,13 +185,13 @@ mod tests {
 
     #[test]
     fn load_url() -> Result<()> {
-        Browser::default().load("http://example.org")?;
+        Engine::default().load("http://example.org")?;
         Ok(())
     }
 
     #[test]
     fn load_url_https() -> Result<()> {
-        Browser::default().load("https://example.org")?;
+        Engine::default().load("https://example.org")?;
         Ok(())
     }
 
@@ -199,7 +199,7 @@ mod tests {
     fn load_file() -> Result<()> {
         let current_dir = env::current_dir().expect("Can't get current directory.");
         let project_root = current_dir.parent().expect("Can't get parent directory");
-        Browser::default()
+        Engine::default()
             .load(format!("file://{}/LICENSE", project_root.to_string_lossy()).as_str())?;
         Ok(())
     }
@@ -222,12 +222,12 @@ mod tests {
 
     #[test]
     fn load_view_source() -> Result<()> {
-        Browser::default().load("view-source:http://example.org/")?;
+        Engine::default().load("view-source:http://example.org/")?;
         Ok(())
     }
 
     fn test_redirect_equality(url_redirect: &str, url_no_redirect: &str) -> Result<()> {
-        let mut browser = Browser::default();
+        let mut browser = Engine::default();
         let body_no_redirect = browser.load(url_no_redirect)?;
         let body_redirect = browser.load(url_redirect)?;
         assert_eq!(body_redirect, body_no_redirect);
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn cache() -> Result<()> {
-        let mut browser = Browser::default();
+        let mut browser = Engine::default();
         browser.load("https://example.org")?;
         browser.load("https://browser.engineering/http.html")?;
         assert!(!browser.cache.into_iter().collect::<Vec<_>>().is_empty());

@@ -5,8 +5,8 @@
       <sourceFolder url="file://$MODULE_DIR$/http/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/browser/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/run/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/url/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/engine/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/http/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
