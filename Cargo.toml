@@ -5,7 +5,7 @@ members = [
     "http",
     "engine",
     "browser",
-    "url",
+    "url", "ui",
 ]
 
 [workspace.dependencies]
