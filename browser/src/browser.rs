@@ -1,6 +1,7 @@
 use std::fs;
 
 use anyhow::{anyhow, Context};
+use unicode_segmentation::UnicodeSegmentation;
 
 use octo_http::cache::Cache;
 use octo_http::request::{Request, RequestMethod, Response};
@@ -33,13 +34,13 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
     let mut skip_entity = false;
 
     let mut result = String::new();
-    let bytes = body.as_bytes();
+    let graphemes = UnicodeSegmentation::graphemes(body, true).collect::<Vec<_>>();
 
     let mut current_index = 0;
-    while current_index < bytes.len() {
-        let c = char::from(bytes[current_index]);
+    while current_index < graphemes.len() {
+        let grapheme = graphemes[current_index];
 
-        if c == '&' {
+        if grapheme == "&" {
             if skip_entity {
                 // Reset.
                 skip_entity = false;
@@ -49,13 +50,13 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
                 // TODO: Use https://html.spec.whatwg.org/entities.json to get all entities
                 // in the spec?
 
-                current_entity.push(c);
+                current_entity.push_str(grapheme);
                 current_index += 1;
 
-                while let Some(next_char) = bytes.get(current_index).map(|b| char::from(*b)) {
-                    current_entity.push(next_char);
+                while let Some(next_grapheme) = graphemes.get(current_index) {
+                    current_entity.push_str(next_grapheme);
                     current_index += 1;
-                    if next_char == ';' || current_entity.len() == MAX_ENTITY_LEN {
+                    if *next_grapheme == ";" || current_entity.len() == MAX_ENTITY_LEN {
                         break;
                     }
                 }
@@ -80,12 +81,12 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
             }
         }
 
-        if c == '<' && render {
+        if grapheme == "<" && render {
             in_tag = true;
-        } else if c == '>' && render {
+        } else if grapheme == ">" && render {
             in_tag = false;
         } else if !in_tag {
-            result.push(c);
+            result.push_str(grapheme);
         }
         current_index += 1;
     }
