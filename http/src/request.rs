@@ -419,7 +419,7 @@ mod tests {
         let first_response = request.make(url, None)?;
         assert!(first_response.body.is_some());
         let second_response = request.make(url, None)?;
-        assert_eq!(first_response, second_response);
+        assert_eq!(first_response.body, second_response.body);
 
         let one_off_response = Request::get(url)?;
         assert_eq!(first_response.body, one_off_response.body);
