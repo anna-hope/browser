@@ -180,42 +180,45 @@ mod tests {
     use std::env;
 
     #[test]
-    fn load_url() {
-        Browser::default().load("http://example.org").unwrap();
+    fn load_url() -> Result<()> {
+        Browser::default().load("http://example.org")?;
+        Ok(())
     }
 
     #[test]
-    fn load_url_https() {
-        Browser::default().load("https://example.org").unwrap();
+    fn load_url_https() -> Result<()> {
+        Browser::default().load("https://example.org")?;
+        Ok(())
     }
 
     #[test]
-    fn load_file() {
-        let project_root = env::current_dir().unwrap();
+    fn load_file() -> Result<()> {
+        let project_root = env::current_dir().expect("Can't get current directory.");
         Browser::default()
-            .load(format!("file://{}/LICENSE", project_root.to_string_lossy()).as_str())
-            .unwrap();
+            .load(format!("file://{}/LICENSE", project_root.to_string_lossy()).as_str())?;
+        Ok(())
     }
 
     #[test]
-    fn parse_entities() {
+    fn parse_entities() -> Result<()> {
         let example = "&lt;div&gt;";
-        let parsed = parse_body(example, true).unwrap();
+        let parsed = parse_body(example, true)?;
         assert_eq!(parsed, "<div>");
+        Ok(())
     }
 
     #[test]
-    fn skip_unknown_entities() {
+    fn skip_unknown_entities() -> Result<()> {
         let example = "&potato;div&chips;";
-        let parsed = parse_body(example, true).unwrap();
+        let parsed = parse_body(example, true)?;
         assert_eq!(parsed, example);
+        Ok(())
     }
 
     #[test]
-    fn load_view_source() {
-        Browser::default()
-            .load("view-source:http://example.org/")
-            .unwrap();
+    fn load_view_source() -> Result<()> {
+        Browser::default().load("view-source:http://example.org/")?;
+        Ok(())
     }
 
     fn test_redirect_equality(url_redirect: &str, url_no_redirect: &str) -> Result<()> {

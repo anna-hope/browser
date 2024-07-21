@@ -216,6 +216,7 @@ impl FromStr for DataUrl {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use anyhow::{anyhow, Result};
 
     impl Url {
         fn scheme(&self) -> Scheme {
@@ -252,48 +253,52 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn parse_url() {
-        let url = "http://example.org".parse::<Url>().unwrap();
+    fn parse_url() -> Result<()> {
+        let url = "http://example.org".parse::<Url>()?;
         assert!(matches!(url.scheme(), Scheme::Http));
-        assert_eq!(url.host().unwrap(), "example.org");
-        assert_eq!(url.path().unwrap(), "/");
-        assert_eq!(url.port().unwrap(), 80);
+        assert_eq!(url.host(), Some("example.org"));
+        assert_eq!(url.path(), Some("/"));
+        assert_eq!(url.port(), Some(80));
+        Ok(())
     }
 
     #[test]
-    fn parse_url_https() {
-        let url = "https://example.org".parse::<Url>().unwrap();
+    fn parse_url_https() -> Result<()> {
+        let url = "https://example.org".parse::<Url>()?;
         assert!(matches!(url.scheme(), Scheme::Https));
-        assert_eq!(url.host().unwrap(), "example.org");
-        assert_eq!(url.path().unwrap(), "/");
-        assert_eq!(url.port().unwrap(), 443);
+        assert_eq!(url.host(), Some("example.org"));
+        assert_eq!(url.path(), Some("/"));
+        assert_eq!(url.port(), Some(443));
+        Ok(())
     }
 
     #[test]
-    fn parse_url_custom_port() {
-        let url = "https://example.org:8000".parse::<Url>().unwrap();
+    fn parse_url_custom_port() -> Result<()> {
+        let url = "https://example.org:8000".parse::<Url>()?;
         assert!(matches!(url.scheme(), Scheme::Https));
-        assert_eq!(url.host().unwrap(), "example.org");
-        assert_eq!(url.path().unwrap(), "/");
-        assert_eq!(url.port().unwrap(), 8000);
+        assert_eq!(url.host(), Some("example.org"));
+        assert_eq!(url.path(), Some("/"));
+        assert_eq!(url.port(), Some(8000));
+        Ok(())
     }
 
     #[test]
-    fn parse_data_url() {
-        let url = "data:text/html,Hello world!".parse::<Url>().unwrap();
+    fn parse_data_url() -> Result<()> {
+        let url = "data:text/html,Hello world!".parse::<Url>()?;
         match url {
             Url::Data(url) => {
                 assert!(matches!(url.scheme, Scheme::Data));
                 assert_eq!(url.mimetype, "text/html");
                 assert_eq!(url.data, "Hello world!");
             }
-            _ => panic!("Expected a DataUrl, got {url:?}"),
+            _ => return Err(anyhow!("Expected a DataUrl, got {url:?}")),
         }
+        Ok(())
     }
 
     #[test]
-    fn parse_view_source_url() {
-        let url = "view-source:http://example.org/".parse::<Url>().unwrap();
+    fn parse_view_source_url() -> Result<()> {
+        let url = "view-source:http://example.org/".parse::<Url>()?;
         match url {
             Url::ViewSource(url) => {
                 assert!(matches!(url.scheme, Scheme::Http));
@@ -301,26 +306,31 @@ pub(crate) mod tests {
                 assert_eq!(url.path, "/");
                 assert_eq!(url.port, 80);
             }
-            _ => panic!("Expected a ViewSource url, got {url:?}"),
+            _ => return Err(anyhow!("Expected a ViewSource url, got {url:?}")),
         }
+        Ok(())
     }
 
     #[test]
-    fn web_url_display() {
+    fn web_url_display() -> Result<()> {
         let url_str = "https://example.org:443/";
-        let url = url_str.parse::<Url>().unwrap();
+        let url = url_str.parse::<Url>()?;
+        #[allow(clippy::unwrap_used)]
         let web_url = url.as_web_url().unwrap();
         assert_eq!(web_url.to_string().as_str(), url_str);
+        Ok(())
     }
 
     #[test]
-    fn web_url_display_2() {
+    fn web_url_display_2() -> Result<()> {
         let url_str = "https://browser.engineering/http.html";
-        let url = url_str.parse::<Url>().unwrap();
+        let url = url_str.parse::<Url>()?;
+        #[allow(clippy::unwrap_used)]
         let web_url = url.as_web_url().unwrap();
         assert_eq!(
             web_url.to_string().as_str(),
             "https://browser.engineering:443/http.html"
         );
+        Ok(())
     }
 }
