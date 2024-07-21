@@ -142,7 +142,6 @@ pub(crate) struct Request {
     method: RequestMethod,
     headers: Headers,
     stream: ReusableTcpStream,
-    keep_alive: bool,
 }
 
 impl Request {
@@ -158,7 +157,6 @@ impl Request {
             method,
             headers,
             stream: ReusableTcpStream::new(),
-            keep_alive,
         }
     }
 

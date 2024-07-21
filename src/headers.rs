@@ -83,15 +83,6 @@ impl Headers {
         None
     }
 
-    /// Returns true if `Headers` contains the given header with non-empty values.
-    fn contains(&self, key: &str) -> bool {
-        if let Some(values) = self.get(key) {
-            !values.is_empty()
-        } else {
-            false
-        }
-    }
-
     /// Returns `Some(true)` if the given header key is associated with the given value,
     /// `Some(false)` if the given header is not associated with the given value,
     /// and `None` if the given header is not in `Headers` at all.
