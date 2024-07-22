@@ -1,5 +1,4 @@
 use std::env;
-use std::rc::Rc;
 
 use anyhow::Result;
 use octo_engine::Engine;
@@ -13,8 +12,9 @@ const APP_ID: &str = "me.annahope.Octo";
 fn show(url: &str, engine: &mut Engine, app: &Application) -> Result<()> {
     let body = engine.load(url)?;
     if let Some(body) = body {
-        let text_view = ui::build_text_view(body.as_str()); // This will segfault.
         if let Some(window) = app.active_window() {
+            // Building the text view without Window in scope will segfault.
+            let text_view = ui::build_text_view(body.as_str());
             window.set_child(Some(&text_view));
         }
     } else {
