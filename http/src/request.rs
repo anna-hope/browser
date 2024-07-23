@@ -7,7 +7,6 @@ use std::num::ParseIntError;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::Result;
 use flate2::read::GzDecoder;
 use lazy_static::lazy_static;
 use thiserror::Error;
@@ -62,13 +61,28 @@ enum GenericTcpStream {
     Secure(Box<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>),
 }
 
+#[derive(Error, Debug)]
+pub(crate) enum RequestError {
+    #[error("invalid scheme for a web URL: {0}")]
+    InvalidScheme(Scheme),
+
+    #[error("can't connect via TCP")]
+    ConnectionFailed(#[from] io::Error),
+
+    #[error("TLS error: {0}")]
+    Tls(#[from] rustls::Error),
+
+    #[error("DNS error: {0}")]
+    DnsName(#[from] rustls::pki_types::InvalidDnsNameError),
+}
+
 impl GenericTcpStream {
-    fn connect_insecure(url: &WebUrl) -> Result<Self> {
+    fn connect_insecure(url: &WebUrl) -> Result<Self, RequestError> {
         let stream = TcpStream::connect(format!("{}:{}", url.host, url.port))?;
         Ok(Self::Insecure(stream))
     }
 
-    fn connect_secure(url: &WebUrl) -> Result<Self> {
+    fn connect_secure(url: &WebUrl) -> Result<Self, RequestError> {
         let stream = TcpStream::connect(format!("{}:{}", url.host, url.port))?;
         let client = rustls::ClientConnection::new(CONFIG.clone(), url.host.clone().try_into()?)?;
         let tls = rustls::StreamOwned::new(client, stream);
@@ -113,9 +127,9 @@ impl ReusableTcpStream {
     }
 
     #[allow(clippy::unwrap_used)]
-    fn get_mut_or_try_init<F>(&mut self, f: F) -> Result<&mut GenericTcpStream>
+    fn get_mut_or_try_init<F>(&mut self, f: F) -> Result<&mut GenericTcpStream, RequestError>
     where
-        F: FnOnce() -> Result<GenericTcpStream>,
+        F: FnOnce() -> Result<GenericTcpStream, RequestError>,
     {
         // There might be a more elegant way of doing this,
         // but this satisfies the borrow checker, and is good enough for now.
@@ -125,15 +139,6 @@ impl ReusableTcpStream {
         }
         Ok(self.0.get_mut().unwrap())
     }
-}
-
-#[derive(Error, Debug)]
-pub(crate) enum RequestError {
-    #[error("invalid scheme for a web URL: {0}")]
-    InvalidScheme(Scheme),
-
-    #[error("can't connect via TCP")]
-    ConnectionFailed(#[from] io::Error),
 }
 
 #[derive(Debug)]
@@ -177,31 +182,35 @@ impl Request {
         string
     }
 
-    pub fn make(&mut self, url: &WebUrl, body: Option<&str>) -> Result<Response> {
+    pub fn make(&mut self, url: &WebUrl, body: Option<&str>) -> Result<Response, HttpError> {
         if !matches!(url.scheme, Scheme::Http) && !matches!(url.scheme, Scheme::Https) {
-            return Err(RequestError::InvalidScheme(url.scheme).into());
+            return Err(NetworkError::from(RequestError::InvalidScheme(url.scheme)).into());
         }
+
         let self_string = self.make_string(url, body);
 
-        let stream = self.stream.get_mut_or_try_init(|| {
-            if matches!(url.scheme, Scheme::Http) {
-                GenericTcpStream::connect_insecure(url)
-            } else {
-                // HTTPS
-                GenericTcpStream::connect_secure(url)
-            }
-        })?;
-        stream.write_all(self_string.as_bytes())?;
+        let stream = self
+            .stream
+            .get_mut_or_try_init(|| {
+                if matches!(url.scheme, Scheme::Http) {
+                    GenericTcpStream::connect_insecure(url)
+                } else {
+                    // HTTPS
+                    GenericTcpStream::connect_secure(url)
+                }
+            })
+            .map_err(NetworkError::from)?;
 
-        Ok(Response::from_stream(stream)?)
+        stream
+            .write_all(self_string.as_bytes())
+            .map_err(|e| NetworkError::from(RequestError::from(e)))?;
+        Ok(Response::from_stream(stream).map_err(NetworkError::from)?)
     }
-}
 
-impl Request {
     /// Convenience method to make a GET request
     /// to the given URL with the default `User-Agent`,
     /// and return the resulting `Response` or error.
-    pub fn get(url: &WebUrl) -> Result<Response> {
+    pub fn get(url: &WebUrl) -> Result<Response, HttpError> {
         let mut request = Self::new(RequestMethod::Get, &url.host, false, true)
             .with_extra_headers(&[("User-Agent", &[USER_AGENT])]);
         request.make(url, None)
@@ -378,6 +387,7 @@ impl FromStr for Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
     use octo_url::Url;
 
     #[test]
