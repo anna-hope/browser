@@ -308,21 +308,6 @@ fn read_body(
 
         let mut buf = vec![0u8; content_length];
         reader.read_exact(&mut buf)?;
-        // let mut bytes_read = 0;
-        // while bytes_read < content_length {
-        //     let new_bytes_read = reader.read(&mut buf)?;
-        //     if new_bytes_read == 0 {
-        //         if !reader.buffer().is_empty() {
-        //             eprintln!(
-        //                 "Got no new bytes, but buffer still has {} bytes left",
-        //                 reader.buffer().len()
-        //             );
-        //         }
-        //         break;
-        //     }
-        //     bytes_read += new_bytes_read;
-        // }
-
         buf
     };
 
