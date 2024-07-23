@@ -55,6 +55,8 @@ fn main() -> Result<glib::ExitCode> {
         if let Some(body) = response {
             let buffer = TextBuffer::builder().text(body).build();
             text_view.set_buffer(Some(&buffer));
+        } else {
+            eprintln!("Response had no body");
         }
 
         window.present();
