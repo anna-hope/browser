@@ -7,7 +7,7 @@ use octo_engine::Engine;
 use octo_ui::gtk::gio::ApplicationFlags;
 use octo_ui::gtk::prelude::*;
 use octo_ui::gtk::{glib, Application, TextBuffer};
-use octo_ui::ui::{build_text_view, build_window};
+use octo_ui::ui::{build_scrolled_window, build_text_view, build_window};
 
 const APP_ID: &str = "me.annahope.Octo";
 
@@ -36,7 +36,9 @@ fn main() -> Result<glib::ExitCode> {
     app.connect_command_line(move |app, cmd| {
         let window = build_window(app);
         let text_view = build_text_view("Loading...");
-        window.set_child(Some(&text_view));
+        let scrolled_window = build_scrolled_window(&[&text_view]);
+
+        window.set_child(Some(&scrolled_window));
 
         let url = cmd
             .arguments()
