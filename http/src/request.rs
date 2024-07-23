@@ -28,7 +28,7 @@ lazy_static! {
 
 #[derive(Error, Debug)]
 #[error(transparent)]
-pub struct BrowserError(#[from] NetworkError);
+pub struct HttpError(#[from] NetworkError);
 
 #[derive(Error, Debug)]
 pub(crate) enum NetworkError {
