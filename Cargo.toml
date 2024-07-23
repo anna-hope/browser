@@ -3,9 +3,8 @@ resolver = "2"
 
 members = [
     "http",
-    "engine",
     "browser",
-    "url", "ui",
+    "url",
 ]
 
 [workspace.dependencies]

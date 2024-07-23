@@ -1,11 +1,12 @@
+use anyhow::{anyhow, Context, Result};
+use gtk::{Application, TextBuffer};
 use std::fs;
-
-use anyhow::{anyhow, Context};
+use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 
 use octo_http::cache::Cache;
 use octo_http::request::{Request, RequestMethod, Response};
-use octo_url::{Url, WebUrl};
+use octo_url::{Url, UrlError, WebUrl};
 
 // TODO: Check what real browsers set this to.
 const MAX_REDIRECTS: u8 = 5;
@@ -15,10 +16,7 @@ const MAX_ENTITY_LEN: usize = 26;
 
 macro_rules! parse_optional_body {
     ($maybe_body:expr, $render:expr) => {
-        $maybe_body
-            .as_deref()
-            .map(|s| parse_body(s, $render))
-            .transpose()
+        $maybe_body.as_deref().map(|s| parse_body(s, $render))
     };
 }
 
@@ -28,7 +26,25 @@ macro_rules! render_optional_body {
     };
 }
 
-fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
+#[derive(Error, Debug)]
+pub enum BrowserError {
+    #[error("GTK hasn't been initialized (make sure you're calling from `connect`)")]
+    GtkNotInitialized,
+
+    #[error("Error loading page: {0}")]
+    Load(#[from] octo_http::HttpError),
+
+    #[error("Redirect error: {0}")]
+    Redirect(String),
+
+    #[error("Error parsing URL: {0}")]
+    ParseUrl(#[from] UrlError),
+
+    #[error("Not a web URL: {0:?}")]
+    NotWebUrl(Url),
+}
+
+fn parse_body(body: &str, render: bool) -> String {
     let mut in_tag = false;
     let mut current_entity = String::new();
     let mut skip_entity = false;
@@ -92,11 +108,11 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
         current_index += 1;
     }
 
-    Ok(result)
+    result
 }
 
 /// Returns the body of a WebUrl, handling potential redirects.
-fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
+fn load_web_url(url: &WebUrl) -> Result<Response> {
     let mut request = Request::new(RequestMethod::Get, &url.host, true, true);
     let mut response = request.make(url, None)?;
     let mut status_code = response.status_code();
@@ -106,13 +122,18 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
         let new_url = response
             .headers
             .get("location")
-            .ok_or_else(|| anyhow!("Missing Location header in {response:?}"))?
+            .ok_or_else(|| {
+                BrowserError::Redirect(format!(
+                    "Missing Location header in response: {:?}",
+                    response.headers
+                ))
+            })?
             .first()
             .ok_or_else(|| {
-                anyhow!(
+                BrowserError::Redirect(format!(
                     "Missing Location value in response headers: {:?}",
                     response.headers
-                )
+                ))
             })?;
 
         let new_url = if new_url.starts_with('/') {
@@ -123,12 +144,17 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
 
         let new_url = new_url
             .as_web_url()
-            .ok_or_else(|| anyhow!("Not a WebUrl: {new_url:?}"))
+            .ok_or_else(|| BrowserError::NotWebUrl(new_url.clone()))
             .context(anyhow!("{response:?}"))?;
 
         response = request.make(new_url, None)?;
         status_code = response.status_code();
         num_redirects += 1;
+    }
+
+    if (300..400).contains(&status_code) {
+        // If we still have a redirect status code and exhausted MAX_REDIRECTS.
+        return Err(BrowserError::Redirect("Too many redirects.".to_string()).into());
     }
 
     Ok(response)
@@ -147,18 +173,18 @@ impl Engine {
             .is_ok()
     }
 
-    fn load_or_get_cached(&mut self, url: &WebUrl) -> anyhow::Result<Option<String>> {
+    fn load_or_get_cached(&mut self, url: &WebUrl) -> Result<Option<String>> {
         if let Some(response) = self.cache.get(url).get() {
-            render_optional_body!(response.as_ref().body)
+            Ok(render_optional_body!(response.as_ref().body))
         } else {
             let response = load_web_url(url)?;
-            let parsed_body = render_optional_body!(&response.body)?;
+            let parsed_body = render_optional_body!(&response.body);
             self.maybe_cache_response(url.clone(), response);
             Ok(parsed_body)
         }
     }
 
-    pub fn load(&mut self, url: &str) -> anyhow::Result<Option<String>> {
+    pub fn load(&mut self, url: &str) -> Result<Option<String>> {
         let url = url.parse::<Url>()?;
 
         match url {
@@ -171,7 +197,7 @@ impl Engine {
             Url::Data(url) => Ok(Some(url.data)),
             Url::ViewSource(url) => {
                 let response = Request::get(&url)?;
-                parse_optional_body!(response.body, false)
+                Ok(parse_optional_body!(response.body, false))
             }
         }
     }
@@ -205,19 +231,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_entities() -> Result<()> {
+    fn parse_entities() {
         let example = "&lt;div&gt;";
-        let parsed = parse_body(example, true)?;
+        let parsed = parse_body(example, true);
         assert_eq!(parsed, "<div>");
-        Ok(())
     }
 
     #[test]
-    fn skip_unknown_entities() -> Result<()> {
+    fn skip_unknown_entities() {
         let example = "&potato;div&chips;";
-        let parsed = parse_body(example, true)?;
+        let parsed = parse_body(example, true);
         assert_eq!(parsed, example);
-        Ok(())
     }
 
     #[test]

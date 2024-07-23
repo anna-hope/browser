@@ -32,9 +32,6 @@ pub struct HttpError(#[from] NetworkError);
 #[derive(Error, Debug)]
 pub(crate) enum NetworkError {
     #[error(transparent)]
-    Url(#[from] UrlError),
-
-    #[error(transparent)]
     Request(#[from] RequestError),
 
     #[error(transparent)]

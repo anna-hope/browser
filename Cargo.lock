@@ -820,15 +820,7 @@ name = "octo-browser"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "octo-engine",
- "octo-ui",
-]
-
-[[package]]
-name = "octo-engine"
-version = "0.1.0"
-dependencies = [
- "anyhow",
+ "gtk4",
  "octo-http",
  "octo-url",
  "thiserror",
@@ -847,13 +839,6 @@ dependencies = [
  "rustls",
  "thiserror",
  "webpki-roots",
-]
-
-[[package]]
-name = "octo-ui"
-version = "0.1.0"
-dependencies = [
- "gtk4",
 ]
 
 [[package]]
