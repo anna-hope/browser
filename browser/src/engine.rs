@@ -12,15 +12,15 @@ const MAX_REDIRECTS: u8 = 5;
 // AFAIK no entity in the spec is longer than 26 chars.
 const MAX_ENTITY_LEN: usize = 26;
 
-macro_rules! parse_optional_body {
+macro_rules! lex_optional_body {
     ($maybe_body:expr, $render:expr) => {
-        $maybe_body.as_deref().map(|s| parse_body(s, $render))
+        $maybe_body.as_deref().map(|s| lex(s, $render))
     };
 }
 
 macro_rules! render_optional_body {
     ($maybe_body:expr) => {
-        parse_optional_body!($maybe_body, true)
+        lex_optional_body!($maybe_body, true)
     };
 }
 
@@ -39,7 +39,7 @@ pub(crate) enum EngineError {
     NotWebUrl(Url),
 }
 
-fn parse_body(body: &str, render: bool) -> String {
+fn lex(body: &str, render: bool) -> String {
     let mut in_tag = false;
     let mut current_entity = String::new();
     let mut skip_entity = false;
@@ -211,7 +211,7 @@ impl Engine {
             Url::Data(url) => Ok(Some(url.data)),
             Url::ViewSource(url) => {
                 let response = Request::get(&url)?;
-                Ok(parse_optional_body!(response.body, false))
+                Ok(lex_optional_body!(response.body, false))
             }
         }
     }
@@ -220,7 +220,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::parse_body;
+    use crate::engine::lex;
     use anyhow::Result;
     use std::env;
 
@@ -248,14 +248,14 @@ mod tests {
     #[test]
     fn parse_entities() {
         let example = "&lt;div&gt;";
-        let parsed = parse_body(example, true);
+        let parsed = lex(example, true);
         assert_eq!(parsed, "<div>");
     }
 
     #[test]
     fn skip_unknown_entities() {
         let example = "&potato;div&chips;";
-        let parsed = parse_body(example, true);
+        let parsed = lex(example, true);
         assert_eq!(parsed, example);
     }
 
