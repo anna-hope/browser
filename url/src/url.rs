@@ -129,14 +129,18 @@ impl FromStr for Url {
             return Ok(Self::About(about_value));
         };
 
-        let url = url_rest
+        let url_no_prefix = url_rest
             .strip_prefix("//")
             .ok_or_else(|| UrlError::Split(url_rest.to_string()))?;
 
-        let url = if url.contains('/') {
-            url.to_string()
+        if url_no_prefix.is_empty() {
+            return Err(UrlError::InvalidUrl(url.to_string()));
+        }
+
+        let url = if url_no_prefix.contains('/') {
+            url_no_prefix.to_string()
         } else {
-            format!("{url}/")
+            format!("{url_no_prefix}/")
         };
 
         // We are guaranteed to have a / in the URL now, so safe to unwrap.
@@ -364,5 +368,15 @@ mod tests {
         let url = url.parse::<Url>()?;
         assert!(matches!(url, Url::About(AboutValue::Blank)));
         Ok(())
+    }
+
+    #[test]
+    fn nothing_after_scheme_is_error() {
+        let url = "https://";
+        let error = url.parse::<Url>().expect_err("Expected to get an error");
+        match error {
+            UrlError::InvalidUrl(error_url) => assert_eq!(error_url, url.to_string()),
+            _ => panic!("Expected UrlError::InvalidUrl, got {error:?}"),
+        }
     }
 }
