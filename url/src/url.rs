@@ -139,9 +139,9 @@ impl FromStr for Url {
             format!("{url}/")
         };
 
-        let (host, url) = url
-            .split_once('/')
-            .ok_or_else(|| UrlError::Split(url.to_string()))?;
+        // We are guaranteed to have a / in the URL now, so safe to unwrap.
+        #[allow(clippy::unwrap_used)]
+        let (host, url) = url.split_once('/').unwrap();
         let path = format!("/{url}");
 
         match scheme {
