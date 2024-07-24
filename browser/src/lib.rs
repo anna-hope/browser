@@ -1,4 +1,5 @@
 mod browser;
-pub mod ui;
+mod engine;
+mod ui;
 
 pub use gtk;
