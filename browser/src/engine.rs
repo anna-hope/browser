@@ -162,6 +162,7 @@ enum LoadedResponse {
 }
 
 #[derive(Debug, Default)]
+#[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct Engine {
     cache: Cache,
 }

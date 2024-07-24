@@ -25,7 +25,7 @@ pub struct Browser {
 }
 
 impl Browser {
-    pub fn load_and_show(&mut self, url: &str) -> Result<()> {
+    pub fn load(&mut self, url: &str) -> Result<()> {
         if let Some(body) = self.engine.load(url)? {
             self.text_buffer.set_text(&body);
         } else {
@@ -46,5 +46,39 @@ impl Browser {
             engine: Engine::default(),
             text_buffer,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gtk::prelude::ApplicationExt;
+    use gtk::Application;
+
+    fn build_application() -> Application {
+        Application::builder()
+            .application_id("me.annahope.browser-test")
+            .build()
+    }
+
+    #[test]
+    fn initialize_without_gtk_returns_error() {
+        let app = build_application();
+        #[allow(clippy::unwrap_used)]
+        let error = Browser::new(&app)
+            .err()
+            .unwrap()
+            .downcast()
+            .expect("Couldn't downcast the error");
+        assert!(matches!(error, BrowserError::GtkNotInitialized));
+    }
+
+    #[test]
+    fn initialize() {
+        let app = build_application();
+        app.connect_activate(|app| {
+            let browser = Browser::new(app).expect("Couldn't initialize the browser");
+            assert_eq!(browser.engine, Engine::default());
+        });
     }
 }
