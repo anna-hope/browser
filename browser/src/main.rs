@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use gtk::gio::ApplicationFlags;
 use gtk::prelude::*;
-use gtk::{glib, Application, TextBuffer};
+use gtk::{glib, Application};
 
 use octo_browser::Browser;
 
@@ -41,7 +41,7 @@ fn main() -> Result<glib::ExitCode> {
             });
 
         let mut browser = Browser::new(app).expect("Failed to initialize the browser");
-        if browser.load_and_show(&url).is_ok() {
+        if browser.load(&url).is_ok() {
             0
         } else {
             1
