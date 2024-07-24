@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context};
 use octo_http::cache::Cache;
 use octo_http::request::{Request, RequestMethod, Response};
+use octo_url::url::AboutValue;
 use octo_url::{Url, UrlError, WebUrl};
 use std::fs;
 use thiserror::Error;
@@ -200,7 +201,10 @@ impl Engine {
     }
 
     pub(crate) fn load(&mut self, url: &str) -> anyhow::Result<Option<String>> {
-        let url = url.parse::<Url>()?;
+        let url = url
+            .parse::<Url>()
+            .inspect_err(|e| eprintln!("{e}"))
+            .unwrap_or(Url::About(AboutValue::Blank));
 
         match url {
             Url::Web(url) => self.load_and_parse_body(url),
@@ -214,6 +218,9 @@ impl Engine {
                 let response = Request::get(&url)?;
                 Ok(lex_optional_body!(response.body, false))
             }
+            Url::About(about_value) => match about_value {
+                AboutValue::Blank => Ok(Some("".to_string())),
+            },
         }
     }
 }

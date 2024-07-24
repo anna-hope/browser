@@ -25,6 +25,7 @@ pub enum Scheme {
     File,
     Data,
     ViewSource,
+    About,
 }
 
 impl Scheme {
@@ -47,6 +48,7 @@ impl FromStr for Scheme {
             "file" => Ok(Self::File),
             "data" => Ok(Self::Data),
             "view-source" => Ok(Self::ViewSource),
+            "about" => Ok(Self::About),
             _ => Err(UrlError::UnknownScheme(s.to_string())),
         }
     }
@@ -67,12 +69,30 @@ impl Display for Scheme {
     }
 }
 
+#[derive(Debug, Copy, Clone, Default)]
+pub enum AboutValue {
+    #[default]
+    Blank,
+}
+
+impl FromStr for AboutValue {
+    type Err = UrlError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "blank" => Ok(Self::Blank),
+            _ => Err(UrlError::InvalidUrl(s.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Url {
     Web(WebUrl),
     File(FileUrl),
     Data(DataUrl),
     ViewSource(WebUrl),
+    About(AboutValue),
 }
 
 impl Url {
@@ -104,7 +124,10 @@ impl FromStr for Url {
                     url
                 ))),
             };
-        }
+        } else if matches!(scheme, Scheme::About) {
+            let about_value = url_rest.parse::<AboutValue>()?;
+            return Ok(Self::About(about_value));
+        };
 
         let url = url_rest
             .strip_prefix("//")
@@ -143,7 +166,7 @@ impl FromStr for Url {
                 path,
             })),
             // We handled this above, so this will never happen.
-            Scheme::Data | Scheme::ViewSource => unreachable!(),
+            Scheme::Data | Scheme::ViewSource | Scheme::About => unreachable!(),
         }
     }
 }
@@ -225,6 +248,7 @@ mod tests {
                 Self::File(url) => url.scheme,
                 Self::Data(url) => url.scheme,
                 Self::ViewSource(_) => Scheme::ViewSource,
+                Self::About(_) => Scheme::About,
             }
         }
 
@@ -331,6 +355,14 @@ mod tests {
             web_url.to_string().as_str(),
             "https://browser.engineering:443/http.html"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn about_blank() -> Result<()> {
+        let url = "about:blank";
+        let url = url.parse::<Url>()?;
+        assert!(matches!(url, Url::About(AboutValue::Blank)));
         Ok(())
     }
 }
