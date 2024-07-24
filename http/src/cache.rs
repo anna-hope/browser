@@ -77,7 +77,7 @@ impl MaybeCachedResponse {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Cache {
     cache: HashMap<WebUrl, ResponseWithCacheProperties>,
 }
