@@ -12,7 +12,7 @@ use lazy_static::lazy_static;
 use thiserror::Error;
 
 use crate::headers::{Headers, HeadersError, USER_AGENT};
-use octo_url::{Scheme, UrlError, WebUrl};
+use octo_url::{Scheme, WebUrl};
 
 lazy_static! {
     static ref ROOT_STORE: Arc<rustls::RootCertStore> = Arc::new(rustls::RootCertStore::from_iter(
