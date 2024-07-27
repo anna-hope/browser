@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/rustup
       - name: Check formatting
         run: cargo fmt --check
 
@@ -25,8 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/gtk
-      - uses: ./.github/actions/rustup
+      - name: Install GTK4
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-1 libgtk-4-dev
       - name: Build
         run: cargo build --verbose
 
@@ -36,8 +35,8 @@ jobs:
     needs: [ "build" ]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/gtk
-      - uses: ./.github/actions/rustup
+      - name: Install GTK4
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-1 libgtk-4-dev
       - name: Run clippy
         run: cargo clippy --all-targets --all-features
 
@@ -47,7 +46,7 @@ jobs:
     needs: [ "build" ]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/gtk
-      - uses: ./.github/actions/rustup
+      - name: Install GTK4
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-1 libgtk-4-dev
       - name: Run tests
         run: cargo test --verbose
