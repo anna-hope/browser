@@ -17,6 +17,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rustup
+      - uses: awalsh128/cache-apt-pkgs-action@v1.4.2
+        with:
+          packages: libgtk-4-1 libgtk-4-dev
+
       - name: Check formatting
         run: cargo fmt --check
 
@@ -25,7 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/gtk
+      - uses: awalsh128/cache-apt-pkgs-action@v1.4.2
+        with:
+          packages: libgtk-4-1 libgtk-4-dev
       - uses: ./.github/actions/rustup
       - name: Build
         run: cargo build --verbose
@@ -36,7 +42,9 @@ jobs:
     needs: [ "build" ]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/gtk
+      - uses: awalsh128/cache-apt-pkgs-action@v1.4.2
+        with:
+          packages: libgtk-4-1 libgtk-4-dev
       - uses: ./.github/actions/rustup
       - name: Run clippy
         run: cargo clippy --all-targets --all-features
@@ -47,7 +55,9 @@ jobs:
     needs: [ "build" ]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/gtk
+      - uses: awalsh128/cache-apt-pkgs-action@v1.4.2
+        with:
+          packages: libgtk-4-1 libgtk-4-dev
       - uses: ./.github/actions/rustup
       - name: Run tests
         run: cargo test --verbose
