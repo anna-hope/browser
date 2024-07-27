@@ -17,6 +17,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Install GTK4
+        run: apt-get update && apt-get install -y libgtk-4-dev
       - name: Check formatting
         run: cargo fmt --check
       - name: Build
