@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/workflows/rustup.yml
+      - uses: ./.github/actions/rustup
       - name: Check formatting
         run: cargo fmt --check
 
@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/workflows/rustup.yml
-      - uses: ./.github/workflows/gtk.yml
+      - uses: ./.github/actions/action.yml
+      - uses: ./.github/actions/action.yml
       - name: Build
         run: cargo build --verbose
 
@@ -36,8 +36,8 @@ jobs:
     needs: [ "build" ]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/workflows/rustup.yml
-      - uses: ./.github/workflows/gtk.yml
+      - uses: ./.github/actions/gtk
+      - uses: ./.github/actions/rustup
       - name: Run clippy
         run: cargo clippy --all-targets --all-features
 
@@ -47,7 +47,7 @@ jobs:
     needs: [ "build" ]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/workflows/rustup.yml
-      - uses: ./.github/workflows/gtk.yml
+      - uses: ./.github/actions/gtk
+      - uses: ./.github/actions/rustup
       - name: Run tests
         run: cargo test --verbose
