@@ -5,7 +5,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-octo-engine = { path = "../engine" }
+gtk = { version = "0.9.0", package = "gtk4", features = ["v4_14"] }
+thiserror = { workspace = true }
+unicode-segmentation = "1.11.0"
+octo-http = { path = "../http" }
+octo-url = { path = "../url" }
 
 [lints]
 workspace = true

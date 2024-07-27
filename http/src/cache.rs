@@ -65,11 +65,19 @@ impl MaybeCachedResponse {
     }
 
     pub fn get(&self) -> Option<impl AsRef<Response>> {
-        self.inner.as_ref().map(Weak::upgrade)?
+        self.inner.as_ref().and_then(Weak::upgrade)
+    }
+
+    /// Return cloned Response if the underlying value hasn't been dropped, or None if it has.
+    pub fn maybe_clone(&self) -> Option<Response> {
+        self.inner
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(Arc::unwrap_or_clone)
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Cache {
     cache: HashMap<WebUrl, ResponseWithCacheProperties>,
 }

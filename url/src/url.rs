@@ -25,6 +25,7 @@ pub enum Scheme {
     File,
     Data,
     ViewSource,
+    About,
 }
 
 impl Scheme {
@@ -47,6 +48,7 @@ impl FromStr for Scheme {
             "file" => Ok(Self::File),
             "data" => Ok(Self::Data),
             "view-source" => Ok(Self::ViewSource),
+            "about" => Ok(Self::About),
             _ => Err(UrlError::UnknownScheme(s.to_string())),
         }
     }
@@ -67,12 +69,30 @@ impl Display for Scheme {
     }
 }
 
+#[derive(Debug, Copy, Clone, Default)]
+pub enum AboutValue {
+    #[default]
+    Blank,
+}
+
+impl FromStr for AboutValue {
+    type Err = UrlError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "blank" => Ok(Self::Blank),
+            _ => Err(UrlError::InvalidUrl(s.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Url {
     Web(WebUrl),
     File(FileUrl),
     Data(DataUrl),
     ViewSource(WebUrl),
+    About(AboutValue),
 }
 
 impl Url {
@@ -104,21 +124,28 @@ impl FromStr for Url {
                     url
                 ))),
             };
-        }
+        } else if matches!(scheme, Scheme::About) {
+            let about_value = url_rest.parse::<AboutValue>()?;
+            return Ok(Self::About(about_value));
+        };
 
-        let url = url_rest
+        let url_no_prefix = url_rest
             .strip_prefix("//")
             .ok_or_else(|| UrlError::Split(url_rest.to_string()))?;
 
-        let url = if url.contains('/') {
-            url.to_string()
+        if url_no_prefix.is_empty() {
+            return Err(UrlError::InvalidUrl(url.to_string()));
+        }
+
+        let url = if url_no_prefix.contains('/') {
+            url_no_prefix.to_string()
         } else {
-            format!("{url}/")
+            format!("{url_no_prefix}/")
         };
 
-        let (host, url) = url
-            .split_once('/')
-            .ok_or_else(|| UrlError::Split(url.to_string()))?;
+        // We are guaranteed to have a / in the URL now, so safe to unwrap.
+        #[allow(clippy::unwrap_used)]
+        let (host, url) = url.split_once('/').unwrap();
         let path = format!("/{url}");
 
         match scheme {
@@ -143,7 +170,7 @@ impl FromStr for Url {
                 path,
             })),
             // We handled this above, so this will never happen.
-            Scheme::Data | Scheme::ViewSource => unreachable!(),
+            Scheme::Data | Scheme::ViewSource | Scheme::About => unreachable!(),
         }
     }
 }
@@ -225,6 +252,7 @@ mod tests {
                 Self::File(url) => url.scheme,
                 Self::Data(url) => url.scheme,
                 Self::ViewSource(_) => Scheme::ViewSource,
+                Self::About(_) => Scheme::About,
             }
         }
 
@@ -332,5 +360,23 @@ mod tests {
             "https://browser.engineering:443/http.html"
         );
         Ok(())
+    }
+
+    #[test]
+    fn about_blank() -> Result<()> {
+        let url = "about:blank";
+        let url = url.parse::<Url>()?;
+        assert!(matches!(url, Url::About(AboutValue::Blank)));
+        Ok(())
+    }
+
+    #[test]
+    fn nothing_after_scheme_is_error() {
+        let url = "https://";
+        let error = url.parse::<Url>().expect_err("Expected to get an error");
+        match error {
+            UrlError::InvalidUrl(error_url) => assert_eq!(error_url, url.to_string()),
+            _ => panic!("Expected UrlError::InvalidUrl, got {error:?}"),
+        }
     }
 }

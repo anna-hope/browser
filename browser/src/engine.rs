@@ -1,11 +1,11 @@
-use std::fs;
-
 use anyhow::{anyhow, Context};
-use unicode_segmentation::UnicodeSegmentation;
-
 use octo_http::cache::Cache;
 use octo_http::request::{Request, RequestMethod, Response};
-use octo_url::{Url, WebUrl};
+use octo_url::url::AboutValue;
+use octo_url::{Url, UrlError, WebUrl};
+use std::fs;
+use thiserror::Error;
+use unicode_segmentation::UnicodeSegmentation;
 
 // TODO: Check what real browsers set this to.
 const MAX_REDIRECTS: u8 = 5;
@@ -13,22 +13,34 @@ const MAX_REDIRECTS: u8 = 5;
 // AFAIK no entity in the spec is longer than 26 chars.
 const MAX_ENTITY_LEN: usize = 26;
 
-macro_rules! parse_optional_body {
+macro_rules! lex_optional_body {
     ($maybe_body:expr, $render:expr) => {
-        $maybe_body
-            .as_deref()
-            .map(|s| parse_body(s, $render))
-            .transpose()
+        $maybe_body.as_deref().map(|s| lex(s, $render))
     };
 }
 
 macro_rules! render_optional_body {
     ($maybe_body:expr) => {
-        parse_optional_body!($maybe_body, true)
+        lex_optional_body!($maybe_body, true)
     };
 }
 
-fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
+#[derive(Error, Debug)]
+pub(crate) enum EngineError {
+    #[error("Error loading page: {0}")]
+    Load(#[from] octo_http::HttpError),
+
+    #[error("Redirect error: {0}")]
+    Redirect(String),
+
+    #[error("Error parsing URL: {0}")]
+    ParseUrl(#[from] UrlError),
+
+    #[error("Not a web URL: {0:?}")]
+    NotWebUrl(Url),
+}
+
+fn lex(body: &str, render: bool) -> String {
     let mut in_tag = false;
     let mut current_entity = String::new();
     let mut skip_entity = false;
@@ -92,7 +104,7 @@ fn parse_body(body: &str, render: bool) -> anyhow::Result<String> {
         current_index += 1;
     }
 
-    Ok(result)
+    result
 }
 
 /// Returns the body of a WebUrl, handling potential redirects.
@@ -106,13 +118,18 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
         let new_url = response
             .headers
             .get("location")
-            .ok_or_else(|| anyhow!("Missing Location header in {response:?}"))?
+            .ok_or_else(|| {
+                EngineError::Redirect(format!(
+                    "Missing Location header in response: {:?}",
+                    response.headers
+                ))
+            })?
             .first()
             .ok_or_else(|| {
-                anyhow!(
+                EngineError::Redirect(format!(
                     "Missing Location value in response headers: {:?}",
                     response.headers
-                )
+                ))
             })?;
 
         let new_url = if new_url.starts_with('/') {
@@ -123,7 +140,7 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
 
         let new_url = new_url
             .as_web_url()
-            .ok_or_else(|| anyhow!("Not a WebUrl: {new_url:?}"))
+            .ok_or_else(|| EngineError::NotWebUrl(new_url.clone()))
             .context(anyhow!("{response:?}"))?;
 
         response = request.make(new_url, None)?;
@@ -131,11 +148,23 @@ fn load_web_url(url: &WebUrl) -> anyhow::Result<Response> {
         num_redirects += 1;
     }
 
+    if (300..400).contains(&status_code) {
+        // If we still have a redirect status code and exhausted MAX_REDIRECTS.
+        return Err(EngineError::Redirect("Too many redirects.".to_string()).into());
+    }
+
     Ok(response)
 }
 
+#[derive(Debug)]
+enum LoadedResponse {
+    Fresh(Response),
+    Cached(Response),
+}
+
 #[derive(Debug, Default)]
-pub struct Engine {
+#[cfg_attr(test, derive(PartialEq))]
+pub(crate) struct Engine {
     cache: Cache,
 }
 
@@ -147,22 +176,38 @@ impl Engine {
             .is_ok()
     }
 
-    fn load_or_get_cached(&mut self, url: &WebUrl) -> anyhow::Result<Option<String>> {
-        if let Some(response) = self.cache.get(url).get() {
-            render_optional_body!(response.as_ref().body)
+    fn load_or_get_cached(&self, url: &WebUrl) -> anyhow::Result<LoadedResponse> {
+        if let Some(response) = self.cache.get(url).maybe_clone() {
+            Ok(LoadedResponse::Cached(response))
         } else {
-            let response = load_web_url(url)?;
-            let parsed_body = render_optional_body!(&response.body)?;
-            self.maybe_cache_response(url.clone(), response);
-            Ok(parsed_body)
+            load_web_url(url).map(LoadedResponse::Fresh)
         }
     }
 
-    pub fn load(&mut self, url: &str) -> anyhow::Result<Option<String>> {
-        let url = url.parse::<Url>()?;
+    fn load_or_maybe_cache(&mut self, url: WebUrl) -> anyhow::Result<Response> {
+        let response = self.load_or_get_cached(&url)?;
+        Ok(match response {
+            LoadedResponse::Fresh(response) => {
+                self.maybe_cache_response(url, response.clone());
+                response
+            }
+            LoadedResponse::Cached(response) => response,
+        })
+    }
+
+    fn load_and_parse_body(&mut self, url: WebUrl) -> anyhow::Result<Option<String>> {
+        let response = self.load_or_maybe_cache(url)?;
+        Ok(render_optional_body!(response.body))
+    }
+
+    pub(crate) fn load(&mut self, url: &str) -> anyhow::Result<Option<String>> {
+        let url = url
+            .parse::<Url>()
+            .inspect_err(|e| eprintln!("{e}"))
+            .unwrap_or(Url::About(AboutValue::Blank));
 
         match url {
-            Url::Web(url) => self.load_or_get_cached(&url),
+            Url::Web(url) => self.load_and_parse_body(url),
             Url::File(url) => {
                 let contents = fs::read(&url.path).context(url.path)?;
                 let contents = String::from_utf8_lossy(&contents);
@@ -171,8 +216,11 @@ impl Engine {
             Url::Data(url) => Ok(Some(url.data)),
             Url::ViewSource(url) => {
                 let response = Request::get(&url)?;
-                parse_optional_body!(response.body, false)
+                Ok(lex_optional_body!(response.body, false))
             }
+            Url::About(about_value) => match about_value {
+                AboutValue::Blank => Ok(Some("".to_string())),
+            },
         }
     }
 }
@@ -180,6 +228,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::lex;
     use anyhow::Result;
     use std::env;
 
@@ -205,19 +254,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_entities() -> Result<()> {
+    fn parse_entities() {
         let example = "&lt;div&gt;";
-        let parsed = parse_body(example, true)?;
+        let parsed = lex(example, true);
         assert_eq!(parsed, "<div>");
-        Ok(())
     }
 
     #[test]
-    fn skip_unknown_entities() -> Result<()> {
+    fn skip_unknown_entities() {
         let example = "&potato;div&chips;";
-        let parsed = parse_body(example, true)?;
+        let parsed = lex(example, true);
         assert_eq!(parsed, example);
-        Ok(())
     }
 
     #[test]
