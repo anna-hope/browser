@@ -11,35 +11,22 @@ env:
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  install-gtk:
-    name: "Install GTK4"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install GTK4
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-1 libgtk-4-dev
-
-  install-rust:
-    name: "Install Rust"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install Rust
-        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
   check-format:
     name: "Check code formatting"
     runs-on: ubuntu-latest
-    needs: [ "install-rust" ]
     steps:
       - uses: actions/checkout@v4
+      - uses: anna-hope/browser/.github/workflows/rustup.yml
       - name: Check formatting
         run: cargo fmt --check
 
   build:
     name: "Build"
     runs-on: ubuntu-latest
-    needs: [ "install-gtk", "install-rust" ]
     steps:
       - uses: actions/checkout@v4
+      - uses: anna-hope/browser/.github/workflows/rustup.yml
+      - uses: anna-hope/browser/.github/workflows/gtk.yml
       - name: Build
         run: cargo build --verbose
 
@@ -49,6 +36,8 @@ jobs:
     needs: [ "build" ]
     steps:
       - uses: actions/checkout@v4
+      - uses: anna-hope/browser/.github/workflows/rustup.yml
+      - uses: anna-hope/browser/.github/workflows/gtk.yml
       - name: Run clippy
         run: cargo clippy --all-targets --all-features
 
@@ -58,5 +47,7 @@ jobs:
     needs: [ "build" ]
     steps:
       - uses: actions/checkout@v4
+      - uses: anna-hope/browser/.github/workflows/rustup.yml
+      - uses: anna-hope/browser/.github/workflows/gtk.yml
       - name: Run tests
         run: cargo test --verbose

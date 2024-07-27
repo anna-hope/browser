@@ -1,0 +1,10 @@
+on:
+  workflow_call: { }
+
+jobs:
+  install-rust:
+    name: "Install Rust"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Rust
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
