@@ -5,25 +5,27 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::num::ParseIntError;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use flate2::read::GzDecoder;
-use lazy_static::lazy_static;
 use thiserror::Error;
 
 use crate::headers::{Headers, HeadersError, USER_AGENT};
 use octo_url::{Scheme, WebUrl};
 
-lazy_static! {
-    static ref ROOT_STORE: Arc<rustls::RootCertStore> = Arc::new(rustls::RootCertStore::from_iter(
-        webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
-    ));
-    static ref CONFIG: Arc<rustls::ClientConfig> = Arc::new(
+static ROOT_STORE: LazyLock<Arc<rustls::RootCertStore>> = LazyLock::new(|| {
+    Arc::new(rustls::RootCertStore::from_iter(
+        webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+    ))
+});
+
+static CONFIG: LazyLock<Arc<rustls::ClientConfig>> = LazyLock::new(|| {
+    Arc::new(
         rustls::ClientConfig::builder()
             .with_root_certificates(ROOT_STORE.clone())
-            .with_no_client_auth()
-    );
-}
+            .with_no_client_auth(),
+    )
+});
 
 #[derive(Error, Debug)]
 #[error(transparent)]
