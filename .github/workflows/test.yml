@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/action.yml
-      - uses: ./.github/actions/action.yml
+      - uses: ./.github/actions/gtk
+      - uses: ./.github/actions/rustup
       - name: Build
         run: cargo build --verbose
 
