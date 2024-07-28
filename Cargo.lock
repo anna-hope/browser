@@ -834,7 +834,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "flate2",
- "lazy_static",
  "octo-url",
  "rustls",
  "thiserror",
