@@ -146,8 +146,8 @@ impl Engine {
                 Ok(Some(tokens))
             }
             Url::Data(url) => {
-                let tokens = vec![Token::new_text_full_len(url.data)];
-                Ok(Some(tokens))
+                let tokens = render_optional_body!(Some(url.data));
+                Ok(tokens)
             }
             Url::ViewSource(url) => {
                 let response = Request::get(&url)?;
