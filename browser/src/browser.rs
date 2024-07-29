@@ -59,12 +59,12 @@ impl Browser {
         let mut style = pango::Style::Normal;
         let mut weight = FontWeight::default();
         let mut text_buf = String::new();
+        let mut size = FontSize::default();
 
         for token in tokens {
             match token {
                 Token::Text { text, start, end } => {
-                    let text_tag_config =
-                        TextTagConfig::new(FontSize::default(), weight, style, None);
+                    let text_tag_config = TextTagConfig::new(size, weight, style, None);
                     tags.push(TextTagWithOffsets::new(&text_tag_config, *start, *end)?);
                     text_buf.push_str(text.as_str());
                 }
@@ -81,6 +81,18 @@ impl Browser {
                     }
                     "/b" => {
                         weight = FontWeight::default();
+                    }
+                    "small" => {
+                        size = FontSize::small();
+                    }
+                    "/small" => {
+                        size = FontSize::default();
+                    }
+                    "big" => {
+                        size = FontSize::big();
+                    }
+                    "/big" => {
+                        size = FontSize::default();
                     }
                     _ => {
                         eprintln!("Unimplemented tag: {tag}");
@@ -157,6 +169,16 @@ mod tests {
         app.connect_activate(|app| {
             let browser = Browser::new(app).expect("Couldn't initialize the browser");
             assert_eq!(browser.engine, Engine::default());
+        });
+    }
+
+    #[test]
+    fn draw() {
+        let app = build_application();
+        let url = "data:text/html,<b><i><small>Hello</small></i></b>";
+        app.connect_activate(|app| {
+            let mut browser = Browser::new(app).expect("Couldn't initialize the browser");
+            browser.load(url).expect("Couldn't load the URL");
         });
     }
 }

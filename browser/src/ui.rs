@@ -8,8 +8,18 @@ const DEFAULT_FONT_FAMILY: &str = "Sans-Serif";
 const DEFAULT_FONT_SIZE: i32 = 16;
 const DEFAULT_FONT_WEIGHT: i32 = 400;
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) struct FontSize(i32);
+
+impl FontSize {
+    pub(crate) fn small() -> Self {
+        Self((DEFAULT_FONT_SIZE - 2) * pango::SCALE)
+    }
+
+    pub(crate) fn big() -> Self {
+        Self((DEFAULT_FONT_SIZE + 4) * pango::SCALE)
+    }
+}
 
 impl Default for FontSize {
     fn default() -> Self {
