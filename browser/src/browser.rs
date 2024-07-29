@@ -1,6 +1,6 @@
 use anyhow::Result;
-use gtk::prelude::TextBufferExt;
-use gtk::{Application, TextBuffer};
+use gtk::prelude::{TextBufferExt, TextBufferExtManual};
+use gtk::{pango, Application, TextBuffer, TextTag};
 use thiserror::Error;
 
 use crate::engine::{Engine, EngineError};
@@ -28,6 +28,22 @@ impl Browser {
     pub fn load(&mut self, url: &str) -> Result<()> {
         if let Some(body) = self.engine.load(url)? {
             self.text_buffer.set_text(&body);
+            let style_tag = TextTag::builder()
+                .name("test")
+                .size(16 * pango::SCALE)
+                .weight(800)
+                .family("Times")
+                .style(pango::Style::Italic)
+                .build();
+
+            let tag_table = self.text_buffer.tag_table();
+            tag_table.add(&style_tag);
+
+            self.text_buffer.apply_tag(
+                &style_tag,
+                &self.text_buffer.start_iter(),
+                &self.text_buffer.end_iter(),
+            );
         } else {
             self.text_buffer.set_text(EMPTY_BODY_TEXT);
         }
