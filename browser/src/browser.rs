@@ -39,6 +39,7 @@ impl TextTagWithOffsets {
         let tag_index = INDEX.fetch_add(1, Ordering::Relaxed);
         let name = format!("{TAG_PREFIX}_{tag_index}");
         let text_tag = build_text_tag(name.as_str(), text_tag_config);
+
         Ok(Self {
             text_tag,
             start,
@@ -60,11 +61,15 @@ impl Browser {
         let mut weight = FontWeight::default();
         let mut text_buf = String::new();
         let mut size = FontSize::default();
+        let mut superscript = false;
 
         for token in tokens {
             match token {
                 Token::Text { text, start, end } => {
-                    let text_tag_config = TextTagConfig::new(size, weight, style, None);
+                    let mut text_tag_config = TextTagConfig::new(size, weight, style, None);
+                    if superscript {
+                        text_tag_config = text_tag_config.with_superscript();
+                    }
                     tags.push(TextTagWithOffsets::new(&text_tag_config, *start, *end)?);
                     text_buf.push_str(text.as_str());
                 }
@@ -77,22 +82,28 @@ impl Browser {
                         style = pango::Style::Normal;
                     }
                     "b" => {
-                        weight = FontWeight { weight: 800 };
+                        weight = FontWeight::bold();
                     }
                     "/b" => {
                         weight = FontWeight::default();
                     }
                     "small" => {
-                        size = FontSize::small();
+                        size = size.small();
                     }
                     "/small" => {
                         size = FontSize::default();
                     }
                     "big" => {
-                        size = FontSize::big();
+                        size = size.big();
                     }
                     "/big" => {
                         size = FontSize::default();
+                    }
+                    "sup" => {
+                        superscript = true;
+                    }
+                    "/sup" => {
+                        superscript = false;
                     }
                     _ => {
                         eprintln!("Unimplemented tag: {tag}");

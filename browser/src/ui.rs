@@ -1,4 +1,4 @@
-use gtk::prelude::{GtkWindowExt, IsA};
+use gtk::prelude::{GtkWindowExt, IsA, TextTagExt};
 use gtk::{
     pango, Application, ApplicationWindow, ScrolledWindow, TextBuffer, TextTag, TextView, Widget,
 };
@@ -7,29 +7,43 @@ const TITLE: &str = "Octo";
 const DEFAULT_FONT_FAMILY: &str = "Sans-Serif";
 const DEFAULT_FONT_SIZE: i32 = 16;
 const DEFAULT_FONT_WEIGHT: i32 = 400;
+const BOLD_FONT_WEIGHT: i32 = 800;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct FontSize(i32);
 
 impl FontSize {
-    pub(crate) fn small() -> Self {
-        Self((DEFAULT_FONT_SIZE - 2) * pango::SCALE)
+    pub(crate) fn small(&self) -> Self {
+        Self(self.0 - 2)
     }
 
-    pub(crate) fn big() -> Self {
-        Self((DEFAULT_FONT_SIZE + 4) * pango::SCALE)
+    pub(crate) fn big(&self) -> Self {
+        Self(self.0 + 4)
+    }
+
+    #[inline]
+    pub(crate) fn scaled(&self) -> i32 {
+        self.0 * pango::SCALE
     }
 }
 
 impl Default for FontSize {
     fn default() -> Self {
-        Self(DEFAULT_FONT_SIZE * pango::SCALE)
+        Self(DEFAULT_FONT_SIZE)
     }
 }
 
 #[derive(Copy, Clone)]
 pub(crate) struct FontWeight {
     pub(crate) weight: i32,
+}
+
+impl FontWeight {
+    pub(crate) fn bold() -> Self {
+        Self {
+            weight: BOLD_FONT_WEIGHT,
+        }
+    }
 }
 
 impl Default for FontWeight {
@@ -40,11 +54,19 @@ impl Default for FontWeight {
     }
 }
 
+impl From<FontWeight> for i32 {
+    fn from(value: FontWeight) -> Self {
+        value.weight
+    }
+}
+
 pub(crate) struct TextTagConfig<'a> {
-    size: i32,
-    weight: i32,
+    size: FontSize,
+    weight: FontWeight,
     style: pango::Style,
     family: &'a str,
+    scale: f64,
+    superscript: bool,
 }
 
 impl<'a> TextTagConfig<'a> {
@@ -55,11 +77,18 @@ impl<'a> TextTagConfig<'a> {
         family: Option<&'a str>,
     ) -> Self {
         Self {
-            size: size.0,
-            weight: weight.weight,
+            size,
+            weight,
             style,
             family: family.unwrap_or(DEFAULT_FONT_FAMILY),
+            scale: pango::SCALE_MEDIUM,
+            superscript: false,
         }
+    }
+
+    pub(crate) fn with_superscript(mut self) -> Self {
+        self.superscript = true;
+        self
     }
 }
 
@@ -80,6 +109,24 @@ fn build_scrolled_window(children: &[&impl IsA<Widget>]) -> ScrolledWindow {
     scrolled_window
 }
 
+pub(crate) fn build_text_tag(name: &str, text_tag_config: &TextTagConfig) -> TextTag {
+    let text_tag = TextTag::builder()
+        .name(name)
+        .size(text_tag_config.size.scaled())
+        .weight(text_tag_config.weight.into())
+        .style(text_tag_config.style)
+        .family(text_tag_config.family)
+        .scale(text_tag_config.scale)
+        .build();
+
+    if text_tag_config.superscript {
+        text_tag.set_scale(0.5);
+        text_tag.set_rise(3 * pango::SCALE);
+    }
+
+    text_tag
+}
+
 pub fn build_ui(app: &Application, text_buffer: &TextBuffer) {
     let app_window = ApplicationWindow::builder()
         .application(app)
@@ -92,14 +139,4 @@ pub fn build_ui(app: &Application, text_buffer: &TextBuffer) {
     let scrolled_window = build_scrolled_window(&[&text_view]);
     app_window.set_child(Some(&scrolled_window));
     app_window.present()
-}
-
-pub(crate) fn build_text_tag(name: &str, text_tag_config: &TextTagConfig) -> TextTag {
-    TextTag::builder()
-        .name(name)
-        .size(text_tag_config.size)
-        .weight(text_tag_config.weight)
-        .style(text_tag_config.style)
-        .family(text_tag_config.family)
-        .build()
 }
