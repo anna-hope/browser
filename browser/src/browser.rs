@@ -1,5 +1,5 @@
 use anyhow::Result;
-use gtk::prelude::{TextBufferExt, TextBufferExtManual};
+use gtk::prelude::TextBufferExt;
 use gtk::{pango, Application, TextBuffer, TextTag};
 use thiserror::Error;
 
