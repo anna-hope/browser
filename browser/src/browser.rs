@@ -1,13 +1,16 @@
 use anyhow::Result;
 use gtk::prelude::TextBufferExt;
 use gtk::{pango, Application, TextBuffer, TextTag};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use thiserror::Error;
 
 use crate::engine::{Engine, EngineError};
-use crate::ui::build_ui;
+use crate::lex::Token;
+use crate::ui::{build_text_tag, build_ui, FontSize, FontWeight, TextTagConfig};
 
 const DEFAULT_LOADING_TEXT: &str = "Loading...";
 const EMPTY_BODY_TEXT: &str = "The response body was empty.";
+const TAG_PREFIX: &str = "tag_";
 
 #[derive(Error, Debug)]
 pub enum BrowserError {
@@ -18,6 +21,32 @@ pub enum BrowserError {
     Engine(#[from] EngineError),
 }
 
+struct TextTagWithOffsets {
+    text_tag: TextTag,
+    start: i32,
+    end: i32,
+}
+
+impl TextTagWithOffsets {
+    fn new(text_tag_config: &TextTagConfig, start: usize, end: usize) -> Result<Self> {
+        // TODO: This might not be the best way to keep track of tags
+        // TODO: Since this way we can't reuse them.
+        static INDEX: AtomicUsize = AtomicUsize::new(0);
+
+        let start = i32::try_from(start)?;
+        let end = i32::try_from(end)?;
+
+        let tag_index = INDEX.fetch_add(1, Ordering::Relaxed);
+        let name = format!("{TAG_PREFIX}_{tag_index}");
+        let text_tag = build_text_tag(name.as_str(), text_tag_config);
+        Ok(Self {
+            text_tag,
+            start,
+            end,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct Browser {
     text_buffer: TextBuffer,
@@ -25,25 +54,58 @@ pub struct Browser {
 }
 
 impl Browser {
+    fn draw(&self, tokens: &[Token]) -> Result<()> {
+        let mut tags = vec![];
+        let mut style = pango::Style::Normal;
+        let mut weight = FontWeight::default();
+        let mut text_buf = String::new();
+
+        for token in tokens {
+            match token {
+                Token::Text { text, start, end } => {
+                    let text_tag_config =
+                        TextTagConfig::new(FontSize::default(), weight, style, None);
+                    tags.push(TextTagWithOffsets::new(&text_tag_config, *start, *end)?);
+                    text_buf.push_str(text.as_str());
+                }
+
+                Token::Tag(tag) => match tag.as_str() {
+                    "i" => {
+                        style = pango::Style::Italic;
+                    }
+                    "/i" => {
+                        style = pango::Style::Normal;
+                    }
+                    "b" => {
+                        weight = FontWeight { weight: 800 };
+                    }
+                    "/b" => {
+                        weight = FontWeight::default();
+                    }
+                    _ => {
+                        eprintln!("Unimplemented tag: {tag}");
+                    }
+                },
+            }
+        }
+
+        self.text_buffer.set_text(text_buf.as_str());
+        let tag_table = self.text_buffer.tag_table();
+        for tag in tags {
+            tag_table.add(&tag.text_tag);
+            self.text_buffer.apply_tag(
+                &tag.text_tag,
+                &self.text_buffer.iter_at_offset(tag.start),
+                &self.text_buffer.iter_at_offset(tag.end),
+            );
+        }
+
+        Ok(())
+    }
+
     pub fn load(&mut self, url: &str) -> Result<()> {
         if let Some(body) = self.engine.load(url)? {
-            self.text_buffer.set_text(&body);
-            let style_tag = TextTag::builder()
-                .name("test")
-                .size(16 * pango::SCALE)
-                .weight(800)
-                .family("Times")
-                .style(pango::Style::Italic)
-                .build();
-
-            let tag_table = self.text_buffer.tag_table();
-            tag_table.add(&style_tag);
-
-            self.text_buffer.apply_tag(
-                &style_tag,
-                &self.text_buffer.start_iter(),
-                &self.text_buffer.end_iter(),
-            );
+            self.draw(&body)?;
         } else {
             self.text_buffer.set_text(EMPTY_BODY_TEXT);
         }

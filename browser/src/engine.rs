@@ -142,11 +142,11 @@ impl Engine {
             Url::File(url) => {
                 let contents = fs::read(&url.path).context(url.path)?;
                 let contents = String::from_utf8_lossy(&contents);
-                let tokens = vec![Token::Text(contents.to_string())];
+                let tokens = vec![Token::new_text_full_len(contents.to_string())];
                 Ok(Some(tokens))
             }
             Url::Data(url) => {
-                let tokens = vec![Token::Text(url.data)];
+                let tokens = vec![Token::new_text_full_len(url.data)];
                 Ok(Some(tokens))
             }
             Url::ViewSource(url) => {
@@ -157,7 +157,7 @@ impl Engine {
                 let body = match about_value {
                     AboutValue::Blank => "".to_string(),
                 };
-                let tokens = vec![Token::Text(body)];
+                let tokens = vec![Token::new_text_full_len(body)];
                 Ok(Some(tokens))
             }
         }

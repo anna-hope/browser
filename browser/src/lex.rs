@@ -3,14 +3,26 @@ use unicode_segmentation::UnicodeSegmentation;
 // AFAIK no entity in the spec is longer than 26 chars.
 const MAX_ENTITY_LEN: usize = 26;
 
-pub(crate) struct Layout {
-    display_list: Vec<Token>,
-}
+// pub(crate) struct Layout {
+//     display_list: Vec<Token>,
+// }
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Token {
-    Text(String),
+    Text {
+        text: String,
+        start: usize,
+        end: usize,
+    },
     Tag(String),
+}
+
+impl Token {
+    pub(crate) fn new_text_full_len(text: String) -> Self {
+        let start = 0;
+        let end = text.len();
+        Self::Text { text, start, end }
+    }
 }
 
 pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
@@ -69,10 +81,16 @@ pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
             }
         }
 
+        current_index += 1;
+
         if grapheme == "<" && render {
             in_tag = true;
             if !current_buf.is_empty() {
-                out.push(Token::Text(current_buf.clone()))
+                out.push(Token::Text {
+                    text: current_buf.clone(),
+                    start: current_index - current_buf.len(),
+                    end: current_index,
+                })
             }
 
             current_buf.clear();
@@ -83,7 +101,6 @@ pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
         } else if !in_tag {
             current_buf.push_str(grapheme);
         }
-        current_index += 1;
     }
 
     out
@@ -97,7 +114,12 @@ mod tests {
     fn parse_entities() {
         let example = "&lt;div&gt;";
         let parsed = lex(example, true);
-        let expected = vec![Token::Text("<div>".to_string())];
+        let text = "<div>".to_string();
+        let expected = vec![Token::Text {
+            start: 0,
+            end: text.len(),
+            text,
+        }];
         assert_eq!(parsed, expected);
     }
 
@@ -105,7 +127,12 @@ mod tests {
     fn skip_unknown_entities() {
         let example = "&potato;div&chips;";
         let parsed = lex(example, true);
-        let expected = vec![Token::Text("&potato;div&chips;".to_string())];
+        let text = example.to_string();
+        let expected = vec![Token::Text {
+            start: 0,
+            end: text.len(),
+            text,
+        }];
         assert_eq!(parsed, expected);
     }
 }
