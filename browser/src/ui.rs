@@ -121,7 +121,9 @@ pub(crate) fn build_text_tag(name: &str, text_tag_config: &TextTagConfig) -> Tex
 
     if text_tag_config.superscript {
         text_tag.set_scale(0.5);
-        text_tag.set_rise(3 * pango::SCALE);
+        // Idk if this is actually the correct way to calculate this.
+        let rise = text_tag.size() / 4;
+        text_tag.set_rise(rise);
     }
 
     text_tag
