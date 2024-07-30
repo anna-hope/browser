@@ -56,54 +56,60 @@ pub struct Browser {
 
 impl Browser {
     fn draw(&self, tokens: &[Token]) -> Result<()> {
+        // TODO: Figure out if there is a cleaner way to do this, but .
+        let mut previous_config = None;
+        let mut text_tag_config = TextTagConfig::default();
         let mut tags = vec![];
-        let mut style = pango::Style::Normal;
-        let mut weight = FontWeight::default();
         let mut text_buf = String::new();
-        let mut size = FontSize::default();
-        let mut superscript = false;
 
         for token in tokens {
             match token {
                 Token::Text { text, start, end } => {
-                    let mut text_tag_config = TextTagConfig::new(size, weight, style, None);
-                    if superscript {
-                        text_tag_config = text_tag_config.with_superscript();
-                    }
-                    tags.push(TextTagWithOffsets::new(&text_tag_config, *start, *end)?);
+                    let tag = TextTagWithOffsets::new(&text_tag_config, *start, *end)?;
+                    tags.push(tag);
                     text_buf.push_str(text.as_str());
                 }
 
+                // I am *not* a fan.
                 Token::Tag(tag) => match tag.as_str() {
                     "i" => {
-                        style = pango::Style::Italic;
+                        previous_config = Some(text_tag_config.clone());
+                        text_tag_config.style = pango::Style::Italic;
                     }
                     "/i" => {
-                        style = pango::Style::Normal;
+                        text_tag_config = previous_config.clone().unwrap_or_default();
                     }
                     "b" => {
-                        weight = FontWeight::bold();
+                        previous_config = Some(text_tag_config.clone());
+                        text_tag_config.weight = FontWeight::bold();
                     }
                     "/b" => {
-                        weight = FontWeight::default();
+                        text_tag_config = previous_config.clone().unwrap_or_default();
                     }
                     "small" => {
-                        size = size.small();
+                        previous_config = Some(text_tag_config.clone());
+                        text_tag_config.size = text_tag_config.size.decrease(2);
                     }
                     "/small" => {
-                        size = FontSize::default();
+                        text_tag_config = previous_config.clone().unwrap_or_default();
                     }
                     "big" => {
-                        size = size.big();
+                        previous_config = Some(text_tag_config.clone());
+                        text_tag_config.size = text_tag_config.size.increase(4);
                     }
                     "/big" => {
-                        size = FontSize::default();
+                        text_tag_config = previous_config.clone().unwrap_or_default();
                     }
                     "sup" => {
-                        superscript = true;
+                        previous_config = Some(text_tag_config.clone());
+                        // Idk if this is actually the correct way to calculate this.
+                        text_tag_config.size = FontSize::default();
+                        text_tag_config.rise_scaled =
+                            FontSize::new_from_points(FontSize::default().points() / 4).scaled();
+                        text_tag_config.scale = 0.5;
                     }
                     "/sup" => {
-                        superscript = false;
+                        text_tag_config = previous_config.clone().unwrap_or_default();
                     }
                     _ => {
                         eprintln!("Unimplemented tag: {tag}");
