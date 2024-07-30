@@ -9,20 +9,8 @@ const MAX_ENTITY_LEN: usize = 26;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Token {
-    Text {
-        text: String,
-        start: usize,
-        end: usize,
-    },
+    Text(String),
     Tag(String),
-}
-
-impl Token {
-    pub(crate) fn new_text_full_len(text: String) -> Self {
-        let start = 0;
-        let end = text.len();
-        Self::Text { text, start, end }
-    }
 }
 
 pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
@@ -36,8 +24,6 @@ pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
     // TODO: Think of a way of getting all the graphemes without allocating another Vec
     let graphemes = UnicodeSegmentation::graphemes(body, true).collect::<Vec<_>>();
 
-    // The indices for the rendered text will not match up with those of the raw body.
-    let mut current_rendered_index = 0;
     let mut current_index = 0;
 
     while current_index < graphemes.len() {
@@ -87,13 +73,7 @@ pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
         if grapheme == "<" && render {
             in_tag = true;
             if !current_buf.is_empty() {
-                let new_rendered_index = current_rendered_index + current_buf.len();
-                out.push(Token::Text {
-                    text: current_buf.clone(),
-                    start: current_rendered_index,
-                    end: new_rendered_index,
-                });
-                current_rendered_index = new_rendered_index;
+                out.push(Token::Text(current_buf.clone()));
             }
 
             current_buf.clear();
@@ -109,11 +89,7 @@ pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
     }
 
     if !in_tag && !current_buf.is_empty() {
-        out.push(Token::Text {
-            start: current_rendered_index,
-            end: current_rendered_index + current_buf.len(),
-            text: current_buf,
-        })
+        out.push(Token::Text(current_buf));
     }
 
     out
@@ -128,7 +104,7 @@ mod tests {
         let example = "&lt;div&gt;";
         let parsed = lex(example, true);
         let text = "<div>".to_string();
-        let expected = vec![Token::new_text_full_len(text)];
+        let expected = vec![Token::Text(text)];
         assert_eq!(parsed, expected);
     }
 
@@ -137,7 +113,7 @@ mod tests {
         let example = "&potato;div&chips;";
         let parsed = lex(example, true);
         let text = example.to_string();
-        let expected = vec![Token::new_text_full_len(text)];
+        let expected = vec![Token::Text(text)];
         assert_eq!(parsed, expected);
     }
 }

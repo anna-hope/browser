@@ -62,12 +62,17 @@ impl Browser {
         let mut tags = vec![];
         let mut text_buf = String::new();
 
+        let mut current_offset = 0;
+
         for token in tokens {
             match token {
-                Token::Text { text, start, end } => {
-                    let tag = TextTagWithOffsets::new(&text_tag_config, *start, *end)?;
+                Token::Text(text) => {
+                    let new_offset = current_offset + text.len();
+                    let tag =
+                        TextTagWithOffsets::new(&text_tag_config, current_offset, new_offset)?;
                     tags.push(tag);
                     text_buf.push_str(text.as_str());
+                    current_offset = new_offset;
                 }
 
                 // I am *not* a fan.
