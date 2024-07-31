@@ -1,6 +1,6 @@
 use anyhow::Result;
 use iced::widget::{column, row, scrollable, text, vertical_space};
-use iced::{Element, Task, Theme};
+use iced::{Element, Fill, Task, Theme};
 use thiserror::Error;
 
 use crate::engine::{Engine, EngineError};
@@ -114,10 +114,13 @@ impl Browser {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let scrollable_content: Element<Message> = Element::from(scrollable(row![column![
-            text("Some content"),
-            vertical_space().height(2400)
-        ]]));
+        let scrollable_content: Element<Message> = Element::from(
+            scrollable(row![column![
+                text("Some content"),
+                vertical_space().height(2400)
+            ]])
+            .width(Fill),
+        );
         scrollable_content
     }
 
