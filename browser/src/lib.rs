@@ -2,4 +2,4 @@ mod browser;
 mod engine;
 mod lex;
 
-pub use browser::Browser;
+pub use browser::{Browser, Message};
