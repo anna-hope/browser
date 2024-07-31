@@ -114,13 +114,8 @@ impl Browser {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let scrollable_content: Element<Message> = Element::from(
-            scrollable(row![column![
-                text("Some content"),
-                vertical_space().height(2400)
-            ]])
-            .width(Fill),
-        );
+        let scrollable_content: Element<Message> =
+            Element::from(scrollable(row![column![text("Some content"),]]).width(Fill));
         scrollable_content
     }
 
