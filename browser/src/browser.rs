@@ -1,4 +1,6 @@
 use anyhow::Result;
+use iced::widget::{column, row, scrollable, text, vertical_space};
+use iced::{Element, Task, Theme};
 use thiserror::Error;
 
 use crate::engine::{Engine, EngineError};
@@ -10,22 +12,28 @@ const TAG_PREFIX: &str = "tag_";
 
 #[derive(Error, Debug)]
 pub enum BrowserError {
-    #[error("GTK hasn't been initialized (make sure you're calling from `connect`)")]
-    GtkNotInitialized,
-
     #[error("Engine error: {0}")]
     Engine(#[from] EngineError),
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    Scrolled(scrollable::Viewport),
 }
 
 #[derive(Debug)]
 pub struct Browser {
     engine: Engine,
+    scrollbar_width: u16,
+    scrollbar_margin: u16,
+    scroller_width: u16,
+    current_scroll_offset: scrollable::RelativeOffset,
+    anchor: scrollable::Anchor,
 }
 
 impl Browser {
     fn draw(&self, tokens: &[Token]) -> Result<()> {
-        // TODO: Figure out if there is a cleaner way to do this, but .
-        let mut text_buf = String::new();
+        let mut _text_buf = String::new();
 
         for token in tokens {
             match token {
@@ -84,8 +92,43 @@ impl Browser {
         Ok(())
     }
 
-    pub fn new() -> Result<Self> {
-        todo!()
+    pub fn new() -> Self {
+        Self {
+            engine: Engine::default(),
+            scrollbar_width: 10,
+            scrollbar_margin: 0,
+            scroller_width: 10,
+            current_scroll_offset: scrollable::RelativeOffset::START,
+            anchor: scrollable::Anchor::Start,
+        }
+    }
+
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Scrolled(viewport) => {
+                self.current_scroll_offset = viewport.relative_offset();
+
+                Task::none()
+            }
+        }
+    }
+
+    pub fn view(&self) -> Element<Message> {
+        let scrollable_content: Element<Message> = Element::from(scrollable(row![column![
+            text("Some content"),
+            vertical_space().height(2400)
+        ]]));
+        scrollable_content
+    }
+
+    pub fn theme(&self) -> Theme {
+        Theme::Light
+    }
+}
+
+impl Default for Browser {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -94,24 +137,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn initialize_without_gtk_returns_error() {
-        #[allow(clippy::unwrap_used)]
-        let error = Browser::new()
-            .err()
-            .unwrap()
-            .downcast()
-            .expect("Couldn't downcast the error");
-        assert!(matches!(error, BrowserError::GtkNotInitialized));
-    }
-
-    #[test]
     fn initialize() {
-        let _browser = Browser::new().expect("Couldn't initialize the browser");
+        let _browser = Browser::new();
     }
 
     #[test]
     fn draw() {
-        let url = "data:text/html,<b><i><small>Hello</small></i></b>";
-        let _browser = Browser::new().expect("Couldn't initialize the browser");
+        let _url = "data:text/html,<b><i><small>Hello</small></i></b>";
+        let _browser = Browser::new();
+        todo!()
     }
 }
