@@ -7,8 +7,8 @@ const MAX_ENTITY_LEN: usize = 26;
 //     display_list: Vec<Token>,
 // }
 
-#[derive(Debug, PartialEq)]
-pub(crate) enum Token {
+#[derive(Debug, PartialEq, Clone)]
+pub enum Token {
     Text(String),
     Tag(String),
 }
