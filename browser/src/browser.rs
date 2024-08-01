@@ -191,14 +191,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn initialize() {
-        let _browser = Browser::new();
-    }
-
-    #[test]
-    fn draw() {
-        let _url = "data:text/html,<b><i><small>Hello</small></i></b>";
-        let _browser = Browser::new();
-        todo!()
+    fn draw() -> anyhow::Result<()> {
+        let url = "data:text/html,<b><i><small>Hello</small></i></b>";
+        let mut engine = Engine::default();
+        let tokens = engine.load(url)?;
+        assert!(tokens.as_ref().is_some_and(|tokens| !tokens.is_empty()));
+        #[allow(clippy::unwrap_used)]
+        super::draw(&tokens.unwrap());
+        // TODO: actually test what we get?
+        Ok(())
     }
 }
