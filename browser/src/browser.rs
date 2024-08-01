@@ -1,4 +1,3 @@
-use anyhow::Result;
 use std::sync::OnceLock;
 use thiserror::Error;
 
@@ -124,7 +123,7 @@ impl Browser {
     }
 }
 
-fn draw(tokens: &[Token]) -> Result<String> {
+fn draw(tokens: &[Token]) -> String {
     let mut text_buf = String::new();
 
     for token in tokens {
@@ -149,7 +148,7 @@ fn draw(tokens: &[Token]) -> Result<String> {
         }
     }
 
-    Ok(text_buf)
+    text_buf
 }
 
 fn url_worker() -> impl Stream<Item = Message> {
@@ -177,17 +176,7 @@ fn url_worker() -> impl Stream<Item = Message> {
                 }
             };
 
-            let body = if let Some(tokens) = tokens {
-                match draw(&tokens) {
-                    Ok(body) => body,
-                    Err(error) => {
-                        eprintln!("{error}");
-                        continue;
-                    }
-                }
-            } else {
-                EMPTY_BODY_TEXT.to_string()
-            };
+            let body = tokens.map_or_else(|| EMPTY_BODY_TEXT.to_string(), |tokens| draw(&tokens));
 
             output
                 .send(Message::UrlLoaded(body))
