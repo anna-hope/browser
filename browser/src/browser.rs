@@ -1,15 +1,24 @@
 use std::sync::OnceLock;
 use thiserror::Error;
 
+use iced::advanced::Widget;
+use iced::font::{Family, Style, Weight};
 use iced::futures::{channel::mpsc, SinkExt, Stream, StreamExt};
-use iced::widget::{column, row, scrollable, text, text_input, TextInput};
-use iced::{stream, Element, Fill, Subscription, Task, Theme};
+use iced::widget::text::{LineHeight, Rich, Span};
+use iced::widget::{column, row, scrollable, text, text_input, Column, Row, TextInput};
+use iced::{
+    stream, window, Element, Fill, Font, Pixels, Point, Renderer, Size, Subscription, Task, Theme,
+};
 
 use crate::engine::{Engine, EngineError};
-use crate::lex::Token;
+use crate::lex::{lex, Token};
 
 const DEFAULT_LOADING_TEXT: &str = "Loading...";
 const EMPTY_BODY_TEXT: &str = "The response body was empty.";
+const HSTEP: f32 = 13.;
+const VSTEP: f32 = 18.;
+const DEFAULT_TEXT_SIZE_PIXELS: f32 = 16.;
+const LINESPACE_MULTIPLIER: f32 = 1.25;
 
 #[derive(Error, Debug)]
 pub enum BrowserError {
@@ -23,8 +32,9 @@ pub enum Message {
     Scrolled(scrollable::Viewport),
     UrlChanged(String),
     NewUrl,
-    UrlLoaded(String),
+    UrlLoaded(Vec<Token>),
     UrlLoading,
+    WindowResized(Size),
 }
 
 #[allow(dead_code)]
@@ -32,12 +42,13 @@ pub enum Message {
 pub struct Browser {
     url: String,
     url_sender: OnceLock<mpsc::Sender<String>>,
-    current_body: Option<String>,
+    tokens: Vec<Token>,
     scrollbar_width: u16,
     scrollbar_margin: u16,
     scroller_width: u16,
     current_scroll_offset: scrollable::RelativeOffset,
     anchor: scrollable::Anchor,
+    current_size: Option<Size>,
 }
 
 impl Browser {
@@ -46,12 +57,13 @@ impl Browser {
             Self {
                 url: "about:blank".to_string(),
                 url_sender: OnceLock::new(),
-                current_body: None,
+                tokens: vec![],
                 scrollbar_width: 10,
                 scrollbar_margin: 0,
                 scroller_width: 10,
                 current_scroll_offset: scrollable::RelativeOffset::START,
                 anchor: scrollable::Anchor::Start,
+                current_size: None,
             },
             Task::none(),
         )
@@ -59,6 +71,16 @@ impl Browser {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Ready(sender) => {
+                self.url_sender
+                    .set(sender)
+                    .expect("Couldn't set the sender");
+                Task::none()
+            }
+            Message::WindowResized(size) => {
+                self.current_size = Some(size);
+                Task::none()
+            }
             Message::Scrolled(viewport) => {
                 self.current_scroll_offset = viewport.relative_offset();
                 Task::none()
@@ -78,17 +100,11 @@ impl Browser {
                 Task::none()
             }
             Message::UrlLoading => {
-                self.current_body = Some(DEFAULT_LOADING_TEXT.to_string());
+                self.tokens = lex(DEFAULT_LOADING_TEXT, true);
                 Task::none()
             }
-            Message::UrlLoaded(body) => {
-                self.current_body = Some(body);
-                Task::none()
-            }
-            Message::Ready(sender) => {
-                self.url_sender
-                    .set(sender)
-                    .expect("Couldn't set the sender");
+            Message::UrlLoaded(tokens) => {
+                self.tokens = tokens;
                 Task::none()
             }
         }
@@ -103,14 +119,10 @@ impl Browser {
             row![input]
         };
 
-        let content = if let Some(body) = &self.current_body {
-            body.as_str()
-        } else {
-            ""
-        };
+        let display_list = layout(&self.tokens);
+        let content = Rich::with_spans(display_list);
 
-        let scrollable_content: Element<Message> =
-            Element::from(scrollable(row![column![text(content)]]).width(Fill));
+        let scrollable_content: Element<Message> = Element::from(scrollable(content).width(Fill));
         column![url_input, scrollable_content].into()
     }
 
@@ -119,26 +131,73 @@ impl Browser {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
+        Subscription::batch([self.url_subscription(), self.resize_subscription()])
+    }
+
+    fn url_subscription(&self) -> Subscription<Message> {
         Subscription::run(url_worker)
+    }
+
+    pub fn resize_subscription(&self) -> Subscription<Message> {
+        window::resize_events().map(|(_id, size)| Message::WindowResized(size))
     }
 }
 
-fn draw(tokens: &[Token]) -> String {
-    let mut text_buf = String::new();
+struct Layout<'a> {
+    display_list: Vec<Span<'a, Message>>,
+    line: Vec<Span<'a, Message>>,
+}
+
+fn layout(tokens: &[Token]) -> Vec<Span<Message>> {
+    let mut display_list = vec![];
+    let mut text_size = DEFAULT_TEXT_SIZE_PIXELS;
+    let mut style = Style::default();
+    let mut weight = Weight::default();
+    // let mut line = vec![];
 
     for token in tokens {
         match token {
-            Token::Text(text) => text_buf.push_str(text.as_str()),
+            Token::Text(text) => {
+                let words =
+                    unicode_segmentation::UnicodeSegmentation::split_word_bounds(text.as_str())
+                        .collect::<Vec<_>>();
+                for word in words {
+                    let font = Font {
+                        family: Family::Serif,
+                        style,
+                        weight,
+                        ..Default::default()
+                    };
+                    let span: Span<Message, _> = Span::new(word).size(text_size).font(font);
+                    display_list.push(span);
+                }
+            }
 
             Token::Tag(tag) => match tag.as_str() {
-                "i" => {}
-                "/i" => {}
-                "b" => {}
-                "/b" => {}
-                "small" => {}
-                "/small" => {}
-                "big" => {}
-                "/big" => {}
+                "i" => {
+                    style = Style::Italic;
+                }
+                "/i" => {
+                    style = Style::default();
+                }
+                "b" => {
+                    weight = Weight::Bold;
+                }
+                "/b" => {
+                    weight = Weight::Normal;
+                }
+                "small" => {
+                    text_size -= 2.;
+                }
+                "/small" => {
+                    text_size += 2.;
+                }
+                "big" => {
+                    text_size += 4.;
+                }
+                "/big" => {
+                    text_size -= 4.;
+                }
                 "sup" => {}
                 "/sup" => {}
                 _ => {
@@ -148,7 +207,7 @@ fn draw(tokens: &[Token]) -> String {
         }
     }
 
-    text_buf
+    display_list
 }
 
 fn url_worker() -> impl Stream<Item = Message> {
@@ -176,10 +235,10 @@ fn url_worker() -> impl Stream<Item = Message> {
                 }
             };
 
-            let body = tokens.map_or_else(|| EMPTY_BODY_TEXT.to_string(), |tokens| draw(&tokens));
+            let tokens = tokens.unwrap_or_else(|| lex(EMPTY_BODY_TEXT, true));
 
             output
-                .send(Message::UrlLoaded(body))
+                .send(Message::UrlLoaded(tokens))
                 .await
                 .expect("Couldn't send the body");
         }
@@ -197,7 +256,7 @@ mod tests {
         let tokens = engine.load(url)?;
         assert!(tokens.as_ref().is_some_and(|tokens| !tokens.is_empty()));
         #[allow(clippy::unwrap_used)]
-        super::draw(&tokens.unwrap());
+        super::layout(&tokens.unwrap());
         // TODO: actually test what we get?
         Ok(())
     }
