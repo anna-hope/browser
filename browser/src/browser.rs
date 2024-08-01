@@ -69,11 +69,13 @@ impl Browser {
                 Task::none()
             }
             Message::NewUrl => {
-                if let Some(sender) = self.url_sender.get_mut() {
-                    sender
-                        .try_send(self.url.clone())
-                        .expect("Couldn't send the url");
-                }
+                let sender = self
+                    .url_sender
+                    .get_mut()
+                    .expect("The sender should be initialized.");
+                sender
+                    .try_send(self.url.clone())
+                    .expect("Couldn't send the url");
                 Task::none()
             }
             Message::UrlLoading => {
@@ -81,7 +83,7 @@ impl Browser {
                 Task::none()
             }
             Message::UrlLoaded(body) => {
-                dbg!(&body);
+                self.current_body = Some(body);
                 Task::none()
             }
             Message::Ready(sender) => {
@@ -123,45 +125,23 @@ impl Browser {
 }
 
 fn draw(tokens: &[Token]) -> Result<String> {
-    let text_buf = String::new();
+    let mut text_buf = String::new();
 
     for token in tokens {
         match token {
-            Token::Text(_text) => {
-                todo!()
-            }
+            Token::Text(text) => text_buf.push_str(text.as_str()),
 
             Token::Tag(tag) => match tag.as_str() {
-                "i" => {
-                    todo!()
-                }
-                "/i" => {
-                    todo!()
-                }
-                "b" => {
-                    todo!()
-                }
-                "/b" => {
-                    todo!()
-                }
-                "small" => {
-                    todo!()
-                }
-                "/small" => {
-                    todo!()
-                }
-                "big" => {
-                    todo!()
-                }
-                "/big" => {
-                    todo!()
-                }
-                "sup" => {
-                    todo!()
-                }
-                "/sup" => {
-                    todo!()
-                }
+                "i" => {}
+                "/i" => {}
+                "b" => {}
+                "/b" => {}
+                "small" => {}
+                "/small" => {}
+                "big" => {}
+                "/big" => {}
+                "sup" => {}
+                "/sup" => {}
                 _ => {
                     eprintln!("Unimplemented tag: {tag}");
                 }
@@ -183,17 +163,28 @@ fn url_worker() -> impl Stream<Item = Message> {
 
         loop {
             let new_url = receiver.select_next_some().await;
-            let tokens = engine
-                .load(new_url.as_str())
-                .expect("Couldn't parse the body");
 
             output
                 .send(Message::UrlLoading)
                 .await
                 .expect("Couldn't send the message");
 
+            let tokens = match engine.load(new_url.as_str()) {
+                Ok(tokens) => tokens,
+                Err(error) => {
+                    eprintln!("{error}");
+                    continue;
+                }
+            };
+
             let body = if let Some(tokens) = tokens {
-                draw(&tokens).expect("Couldn't render the tokens")
+                match draw(&tokens) {
+                    Ok(body) => body,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        continue;
+                    }
+                }
             } else {
                 EMPTY_BODY_TEXT.to_string()
             };
