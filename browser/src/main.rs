@@ -15,6 +15,7 @@ fn main() -> iced::Result {
     iced::application(TITLE, Browser::update, Browser::view)
         .theme(Browser::theme)
         .window(settings)
-        .subscription(Browser::subscription)
+        .subscription(Browser::url_subscription)
+        .subscription(Browser::resize_subscription)
         .run_with(Browser::new)
 }
