@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::OnceLock;
 use thiserror::Error;
 
@@ -145,7 +146,48 @@ impl Browser {
 
 struct Layout<'a> {
     display_list: Vec<Span<'a, Message>>,
-    line: Vec<Span<'a, Message>>,
+    line: VecDeque<Span<'a, Message>>,
+    text_size: f32,
+    style: Style,
+    weight: Weight,
+}
+
+impl<'a> Default for Layout<'a> {
+    fn default() -> Self {
+        Self {
+            display_list: vec![],
+            line: VecDeque::new(),
+            text_size: DEFAULT_TEXT_SIZE_PIXELS,
+            style: Style::default(),
+            weight: Weight::default(),
+        }
+    }
+}
+
+impl<'a> Layout<'a> {
+    fn flush(&mut self) {
+        if self.line.is_empty() {
+            return;
+        }
+
+        while let Some(span) = self.line.pop_front() {
+            self.display_list.push(span);
+        }
+
+        self.display_list.push(Span::new('\n'));
+    }
+
+    fn push(&mut self, text: &'a str) {
+        let font = Font {
+            family: Family::default(),
+            style: self.style,
+            weight: self.weight,
+            ..Default::default()
+        };
+
+        let span: Span<Message> = Span::new(text).size(self.text_size).font(font);
+        self.line.push_back(span);
+    }
 }
 
 fn layout(tokens: &[Token]) -> Vec<Span<Message>> {
@@ -153,22 +195,22 @@ fn layout(tokens: &[Token]) -> Vec<Span<Message>> {
     let mut text_size = DEFAULT_TEXT_SIZE_PIXELS;
     let mut style = Style::default();
     let mut weight = Weight::default();
-    // let mut line = vec![];
 
     for token in tokens {
         match token {
             Token::Text(text) => {
-                let words =
+                // This includes the original whitespace.
+                let text_tokens =
                     unicode_segmentation::UnicodeSegmentation::split_word_bounds(text.as_str())
                         .collect::<Vec<_>>();
-                for word in words {
+                for text_token in text_tokens {
                     let font = Font {
                         family: Family::Serif,
                         style,
                         weight,
                         ..Default::default()
                     };
-                    let span: Span<Message, _> = Span::new(word).size(text_size).font(font);
+                    let span: Span<Message, _> = Span::new(text_token).size(text_size).font(font);
                     display_list.push(span);
                 }
             }
@@ -256,7 +298,7 @@ mod tests {
         let tokens = engine.load(url)?;
         assert!(tokens.as_ref().is_some_and(|tokens| !tokens.is_empty()));
         #[allow(clippy::unwrap_used)]
-        super::layout(&tokens.unwrap());
+        layout(&tokens.unwrap());
         // TODO: actually test what we get?
         Ok(())
     }
