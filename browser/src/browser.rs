@@ -8,7 +8,8 @@ use iced::futures::{channel::mpsc, SinkExt, Stream, StreamExt};
 use iced::widget::text::{LineHeight, Rich, Span};
 use iced::widget::{column, row, scrollable, text, text_input, Column, Row, TextInput};
 use iced::{
-    stream, window, Element, Fill, Font, Pixels, Point, Renderer, Size, Subscription, Task, Theme,
+    stream, window, Color, Element, Fill, Font, Pixels, Point, Renderer, Size, Subscription, Task,
+    Theme,
 };
 
 use crate::engine::{Engine, EngineError};
@@ -120,8 +121,8 @@ impl Browser {
             row![input]
         };
 
-        let display_list = layout(&self.tokens);
-        let content = Rich::with_spans(display_list);
+        let display_list = Layout::make_display_list(&self.tokens);
+        let content = Element::from(Rich::with_spans(display_list)).explain(Color::default());
 
         let scrollable_content: Element<Message> = Element::from(scrollable(content).width(Fill));
         column![url_input, scrollable_content].into()
@@ -144,112 +145,105 @@ impl Browser {
     }
 }
 
+type DisplayList<'a> = Vec<Span<'a, Message>>;
+
 struct Layout<'a> {
-    display_list: Vec<Span<'a, Message>>,
-    line: VecDeque<Span<'a, Message>>,
+    display_list: DisplayList<'a>,
     text_size: f32,
     style: Style,
     weight: Weight,
+}
+
+impl<'a> Layout<'a> {
+    fn make_display_list(tokens: &'a [Token]) -> DisplayList {
+        let mut layout = Self::default();
+        layout.process_all_tokens(tokens);
+        layout.display_list
+    }
+
+    fn process_text(&mut self, text: &'a str) {
+        let text_tokens =
+            unicode_segmentation::UnicodeSegmentation::split_word_bounds(text).collect::<Vec<_>>();
+        for text_token in text_tokens {
+            let font = Font {
+                family: Family::Serif,
+                style: self.style,
+                weight: self.weight,
+                ..Default::default()
+            };
+
+            let span: Span<Message> = Span::new(text_token).size(self.text_size).font(font);
+            self.display_list.push(span);
+        }
+    }
+
+    fn process_token(&mut self, token: &'a Token) {
+        match token {
+            Token::Text(text) => {
+                self.process_text(text.as_str());
+            }
+            Token::Tag(tag) => match tag.as_str() {
+                "i" => {
+                    self.style = Style::Italic;
+                }
+                "/i" => {
+                    self.style = Style::default();
+                }
+                "b" => {
+                    self.weight = Weight::Bold;
+                }
+                "/b" => {
+                    self.weight = Weight::Normal;
+                }
+                "small" => {
+                    self.text_size -= 2.;
+                }
+                "/small" => {
+                    self.text_size += 2.;
+                }
+                "big" => {
+                    self.text_size += 4.;
+                }
+                "/big" => {
+                    self.text_size -= 4.;
+                }
+                "sup" => {}
+                "/sup" => {}
+                "br" => {
+                    self.flush();
+                }
+                "/p" => {
+                    self.flush();
+                    // We ultimately want to add line separation here in the layout,
+                    // not just a newline.
+                    self.flush();
+                }
+                _ => {}
+            },
+        }
+    }
+
+    fn flush(&mut self) {
+        self.display_list.push(Span::new('\n'));
+    }
+
+    fn process_all_tokens(&mut self, tokens: &'a [Token]) {
+        for token in tokens {
+            self.process_token(token);
+        }
+        self.flush();
+    }
 }
 
 impl<'a> Default for Layout<'a> {
     fn default() -> Self {
         Self {
             display_list: vec![],
-            line: VecDeque::new(),
             text_size: DEFAULT_TEXT_SIZE_PIXELS,
             style: Style::default(),
             weight: Weight::default(),
         }
     }
-}
-
-impl<'a> Layout<'a> {
-    fn flush(&mut self) {
-        if self.line.is_empty() {
-            return;
-        }
-
-        while let Some(span) = self.line.pop_front() {
-            self.display_list.push(span);
-        }
-
-        self.display_list.push(Span::new('\n'));
-    }
-
-    fn push(&mut self, text: &'a str) {
-        let font = Font {
-            family: Family::default(),
-            style: self.style,
-            weight: self.weight,
-            ..Default::default()
-        };
-
-        let span: Span<Message> = Span::new(text).size(self.text_size).font(font);
-        self.line.push_back(span);
-    }
-}
-
-fn layout(tokens: &[Token]) -> Vec<Span<Message>> {
-    let mut display_list = vec![];
-    let mut text_size = DEFAULT_TEXT_SIZE_PIXELS;
-    let mut style = Style::default();
-    let mut weight = Weight::default();
-
-    for token in tokens {
-        match token {
-            Token::Text(text) => {
-                // This includes the original whitespace.
-                let text_tokens =
-                    unicode_segmentation::UnicodeSegmentation::split_word_bounds(text.as_str())
-                        .collect::<Vec<_>>();
-                for text_token in text_tokens {
-                    let font = Font {
-                        family: Family::Serif,
-                        style,
-                        weight,
-                        ..Default::default()
-                    };
-                    let span: Span<Message, _> = Span::new(text_token).size(text_size).font(font);
-                    display_list.push(span);
-                }
-            }
-
-            Token::Tag(tag) => match tag.as_str() {
-                "i" => {
-                    style = Style::Italic;
-                }
-                "/i" => {
-                    style = Style::default();
-                }
-                "b" => {
-                    weight = Weight::Bold;
-                }
-                "/b" => {
-                    weight = Weight::Normal;
-                }
-                "small" => {
-                    text_size -= 2.;
-                }
-                "/small" => {
-                    text_size += 2.;
-                }
-                "big" => {
-                    text_size += 4.;
-                }
-                "/big" => {
-                    text_size -= 4.;
-                }
-                "sup" => {}
-                "/sup" => {}
-                _ => {
-                    eprintln!("Unimplemented tag: {tag}");
-                }
-            },
-        }
-    }
-
-    display_list
 }
 
 fn url_worker() -> impl Stream<Item = Message> {
