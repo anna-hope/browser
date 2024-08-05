@@ -1,3 +1,5 @@
+use crate::lex;
+use crate::lex::Token;
 use anyhow::{anyhow, Context};
 use octo_http::cache::Cache;
 use octo_http::request::{Request, RequestMethod, Response};
@@ -5,17 +7,13 @@ use octo_url::url::AboutValue;
 use octo_url::{Url, UrlError, WebUrl};
 use std::fs;
 use thiserror::Error;
-use unicode_segmentation::UnicodeSegmentation;
 
 // TODO: Check what real browsers set this to.
 const MAX_REDIRECTS: u8 = 5;
 
-// AFAIK no entity in the spec is longer than 26 chars.
-const MAX_ENTITY_LEN: usize = 26;
-
 macro_rules! lex_optional_body {
     ($maybe_body:expr, $render:expr) => {
-        $maybe_body.as_deref().map(|s| lex(s, $render))
+        $maybe_body.as_deref().map(|s| lex::lex(s, $render))
     };
 }
 
@@ -38,73 +36,6 @@ pub(crate) enum EngineError {
 
     #[error("Not a web URL: {0:?}")]
     NotWebUrl(Url),
-}
-
-fn lex(body: &str, render: bool) -> String {
-    let mut in_tag = false;
-    let mut current_entity = String::new();
-    let mut skip_entity = false;
-
-    let mut result = String::new();
-    // TODO: Think of a way of getting all the graphemes without allocating another Vec
-    let graphemes = UnicodeSegmentation::graphemes(body, true).collect::<Vec<_>>();
-
-    let mut current_index = 0;
-    while current_index < graphemes.len() {
-        let grapheme = graphemes[current_index];
-
-        if grapheme == "&" {
-            if skip_entity {
-                // Reset.
-                skip_entity = false;
-            } else {
-                // This is an entity, so we'll consume the chars until we reach its end.
-
-                // TODO: Use https://html.spec.whatwg.org/entities.json to get all entities
-                // in the spec?
-
-                current_entity.push_str(grapheme);
-                current_index += 1;
-
-                while let Some(next_grapheme) = graphemes.get(current_index) {
-                    current_entity.push_str(next_grapheme);
-                    current_index += 1;
-                    if *next_grapheme == ";" || current_entity.len() == MAX_ENTITY_LEN {
-                        break;
-                    }
-                }
-
-                let parsed_entity = match current_entity.as_str() {
-                    "&lt;" => Some('<'),
-                    "&gt;" => Some('>'),
-                    _ => None,
-                };
-
-                if let Some(entity) = parsed_entity {
-                    result.push(entity);
-                } else {
-                    // Skip entities we don't know by "rewinding" the index
-                    // to start at the current entity (or whatever else starts with &).
-                    // (I don't love this.)
-                    skip_entity = true;
-                    current_index -= current_entity.len();
-                }
-                current_entity.clear();
-                continue;
-            }
-        }
-
-        if grapheme == "<" && render {
-            in_tag = true;
-        } else if grapheme == ">" && render {
-            in_tag = false;
-        } else if !in_tag {
-            result.push_str(grapheme);
-        }
-        current_index += 1;
-    }
-
-    result
 }
 
 /// Returns the body of a WebUrl, handling potential redirects.
@@ -195,12 +126,12 @@ impl Engine {
         })
     }
 
-    fn load_and_parse_body(&mut self, url: WebUrl) -> anyhow::Result<Option<String>> {
+    fn load_and_parse_body(&mut self, url: WebUrl) -> anyhow::Result<Option<Vec<Token>>> {
         let response = self.load_or_maybe_cache(url)?;
         Ok(render_optional_body!(response.body))
     }
 
-    pub(crate) fn load(&mut self, url: &str) -> anyhow::Result<Option<String>> {
+    pub(crate) fn load(&mut self, url: &str) -> anyhow::Result<Option<Vec<Token>>> {
         let url = url
             .parse::<Url>()
             .inspect_err(|e| eprintln!("{e}"))
@@ -211,16 +142,24 @@ impl Engine {
             Url::File(url) => {
                 let contents = fs::read(&url.path).context(url.path)?;
                 let contents = String::from_utf8_lossy(&contents);
-                Ok(Some(contents.to_string()))
+                let tokens = vec![Token::Text(contents.to_string())];
+                Ok(Some(tokens))
             }
-            Url::Data(url) => Ok(Some(url.data)),
+            Url::Data(url) => {
+                let tokens = render_optional_body!(Some(url.data));
+                Ok(tokens)
+            }
             Url::ViewSource(url) => {
                 let response = Request::get(&url)?;
                 Ok(lex_optional_body!(response.body, false))
             }
-            Url::About(about_value) => match about_value {
-                AboutValue::Blank => Ok(Some("".to_string())),
-            },
+            Url::About(about_value) => {
+                let body = match about_value {
+                    AboutValue::Blank => "".to_string(),
+                };
+                let tokens = vec![Token::Text(body)];
+                Ok(Some(tokens))
+            }
         }
     }
 }
@@ -228,7 +167,6 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::lex;
     use anyhow::Result;
     use std::env;
 
@@ -251,20 +189,6 @@ mod tests {
         Engine::default()
             .load(format!("file://{}/LICENSE", project_root.to_string_lossy()).as_str())?;
         Ok(())
-    }
-
-    #[test]
-    fn parse_entities() {
-        let example = "&lt;div&gt;";
-        let parsed = lex(example, true);
-        assert_eq!(parsed, "<div>");
-    }
-
-    #[test]
-    fn skip_unknown_entities() {
-        let example = "&potato;div&chips;";
-        let parsed = lex(example, true);
-        assert_eq!(parsed, example);
     }
 
     #[test]

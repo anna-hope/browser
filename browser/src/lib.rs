@@ -1,6 +1,5 @@
 mod browser;
 mod engine;
-mod ui;
+mod lex;
 
-pub use browser::Browser;
-pub use gtk;
+pub use browser::{Browser, Message};

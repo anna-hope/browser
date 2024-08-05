@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-gtk = { version = "0.9.0", package = "gtk4", features = ["v4_14"] }
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "fd593f8", features = ["advanced"] }
 thiserror = { workspace = true }
 unicode-segmentation = "1.11.0"
 octo-http = { path = "../http" }
