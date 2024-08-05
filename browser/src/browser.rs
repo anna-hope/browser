@@ -12,10 +12,7 @@ use crate::lex::{lex, Token};
 
 const DEFAULT_LOADING_TEXT: &str = "Loading...";
 const EMPTY_BODY_TEXT: &str = "The response body was empty.";
-const HSTEP: f32 = 13.;
-const VSTEP: f32 = 18.;
 const DEFAULT_TEXT_SIZE_PIXELS: f32 = 16.;
-const LINESPACE_MULTIPLIER: f32 = 1.25;
 
 #[derive(Error, Debug)]
 pub enum BrowserError {
