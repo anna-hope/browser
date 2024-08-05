@@ -1,16 +1,11 @@
-use std::collections::VecDeque;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use iced::advanced::Widget;
 use iced::font::{Family, Style, Weight};
 use iced::futures::{channel::mpsc, SinkExt, Stream, StreamExt};
-use iced::widget::text::{LineHeight, Rich, Span};
-use iced::widget::{column, row, scrollable, text, text_input, Column, Row, TextInput};
-use iced::{
-    stream, window, Color, Element, Fill, Font, Pixels, Point, Renderer, Size, Subscription, Task,
-    Theme,
-};
+use iced::widget::text::{Rich, Span};
+use iced::widget::{column, row, scrollable, text_input, Column, TextInput};
+use iced::{stream, window, Element, Fill, Font, Size, Subscription, Task, Theme};
 
 use crate::engine::{Engine, EngineError};
 use crate::lex::{lex, Token};
