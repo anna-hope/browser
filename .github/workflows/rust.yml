@@ -32,4 +32,4 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features
       - name: Run tests
-        run: cargo nextest
+        run: cargo nextest run
