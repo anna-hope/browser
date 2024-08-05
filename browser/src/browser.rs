@@ -125,8 +125,8 @@ impl Browser {
         let content = Rich::with_spans(display_list).width(Fill);
 
         let scrollable_content: Element<Message> = Element::from(scrollable(content).width(Fill));
-        let column = column![url_input, scrollable_content];
-        column.into()
+        let column: Column<_> = column![url_input, scrollable_content];
+        column.width(Fill).padding(5).into()
     }
 
     pub fn theme(&self) -> Theme {
@@ -163,19 +163,15 @@ impl<'a> Layout<'a> {
     }
 
     fn process_text(&mut self, text: &'a str) {
-        let text_tokens =
-            unicode_segmentation::UnicodeSegmentation::split_word_bounds(text).collect::<Vec<_>>();
-        for text_token in text_tokens {
-            let font = Font {
-                family: Family::Serif,
-                style: self.style,
-                weight: self.weight,
-                ..Default::default()
-            };
+        let font = Font {
+            family: Family::Serif,
+            style: self.style,
+            weight: self.weight,
+            ..Default::default()
+        };
 
-            let span: Span<Message> = Span::new(text_token).size(self.text_size).font(font);
-            self.display_list.push(span);
-        }
+        let span: Span<Message> = Span::new(text).size(self.text_size).font(font);
+        self.display_list.push(span);
     }
 
     fn process_token(&mut self, token: &'a Token) {
