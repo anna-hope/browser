@@ -25,13 +25,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: awalsh128/cache-apt-pkgs-action@v1.4.2
-        with:
-          packages: libgtk-4-1 libgtk-4-dev
       - uses: ./.github/actions/rustup
+      - uses: taiki-e/install-action@nextest
       - name: Build
         run: cargo build --verbose
       - name: Run clippy
         run: cargo clippy --all-targets --all-features
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo nextest
