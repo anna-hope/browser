@@ -1,11 +1,18 @@
 use std::sync::OnceLock;
 use thiserror::Error;
 
+use iced::advanced::text::Shaping;
+use iced::advanced::Widget;
 use iced::font::{Family, Style, Weight};
 use iced::futures::{channel::mpsc, SinkExt, Stream, StreamExt};
-use iced::widget::text::{Rich, Span};
-use iced::widget::{column, row, scrollable, text_input, Column, TextInput};
-use iced::{stream, window, Element, Fill, Font, Size, Subscription, Task, Theme};
+use iced::mouse::Cursor;
+use iced::widget::canvas::{Frame, Geometry, Program};
+use iced::widget::text::{LineHeight, Rich, Span};
+use iced::widget::{canvas, column, row, scrollable, text_input, Column, TextInput};
+use iced::{
+    stream, window, Color, Element, Fill, Font, Pixels, Point, Rectangle, Renderer, Size,
+    Subscription, Task, Theme,
+};
 
 use crate::engine::{Engine, EngineError};
 use crate::lex::{lex, Token};
@@ -114,7 +121,9 @@ impl Browser {
         };
 
         let display_list = Layout::make_display_list(&self.tokens);
-        let content = Rich::with_spans(display_list).width(Fill);
+        let text = CanvasText::from_spans(&display_list);
+
+        let content = canvas::Canvas::new(text).width(Fill);
 
         let scrollable_content: Element<Message> = Element::from(scrollable(content).width(Fill));
         let column: Column<_> = column![url_input, scrollable_content];
@@ -232,6 +241,49 @@ impl<'a> Default for Layout<'a> {
             style: Style::default(),
             weight: Weight::default(),
         }
+    }
+}
+
+#[derive(Debug)]
+struct CanvasText {
+    texts: Vec<canvas::Text>,
+}
+
+impl CanvasText {
+    fn from_spans(spans: &[Span<Message>]) -> Self {
+        let mut texts = Vec::with_capacity(spans.len());
+        for span in spans {
+            let text = canvas::Text {
+                content: span.text.to_string(),
+                font: span.font.unwrap_or_default(),
+                size: span.size.unwrap_or(DEFAULT_TEXT_SIZE_PIXELS.into()),
+                shaping: Shaping::Advanced,
+                ..Default::default()
+            };
+
+            texts.push(text);
+        }
+
+        Self { texts }
+    }
+}
+
+impl Program<Message> for CanvasText {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry<Renderer>> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        for text in &self.texts {
+            text.draw_with(|path, color| frame.fill(&path, color))
+        }
+        vec![frame.into_geometry()]
     }
 }
 
