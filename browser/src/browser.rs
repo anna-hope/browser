@@ -122,10 +122,11 @@ impl Browser {
         };
 
         let display_list = Layout::make_display_list(&self.tokens);
-        let content = Element::from(Rich::with_spans(display_list)).explain(Color::default());
+        let content = Rich::with_spans(display_list).width(Fill);
 
         let scrollable_content: Element<Message> = Element::from(scrollable(content).width(Fill));
-        column![url_input, scrollable_content].into()
+        let column = column![url_input, scrollable_content];
+        column.into()
     }
 
     pub fn theme(&self) -> Theme {
