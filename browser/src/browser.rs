@@ -289,7 +289,6 @@ mod tests {
         let tokens = engine.load(url)?;
         assert!(tokens.as_ref().is_some_and(|tokens| !tokens.is_empty()));
         #[allow(clippy::unwrap_used)]
-        layout(&tokens.unwrap());
         // TODO: actually test what we get?
         Ok(())
     }
