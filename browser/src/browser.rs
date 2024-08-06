@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use thiserror::Error;
 
 use eframe::egui::{Context, Visuals};
@@ -27,7 +28,7 @@ pub enum BrowserError {
 pub struct Browser {
     url: String,
     engine: Engine,
-    display_list: DisplayList,
+    processed_tokens: Vec<ProcessedToken>,
 }
 
 impl eframe::App for Browser {
@@ -41,10 +42,13 @@ impl eframe::App for Browser {
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 match self.engine.load(&self.url) {
                     Ok(Some(tokens)) => {
-                        self.display_list = Layout::display_list(tokens);
+                        self.processed_tokens =
+                            TokenProcessor::from_tokens(tokens).processed_tokens;
                     }
                     Ok(None) => {
-                        self.display_list = Layout::display_list(lex(EMPTY_BODY_TEXT, true));
+                        self.processed_tokens =
+                            TokenProcessor::from_tokens(lex(EMPTY_BODY_TEXT, true))
+                                .processed_tokens;
                     }
                     Err(error) => {
                         ui.label(error.to_string());
@@ -52,48 +56,17 @@ impl eframe::App for Browser {
                 }
             }
 
-            let mut current_x = starting_x!(ui);
+            let display_list =
+                Layout::display_list(&self.processed_tokens, ui, PADDING + response.rect.height());
 
-            // Show below the address bar
-            let mut current_y = ui.min_rect().top() + response.rect.height() + PADDING;
-
-            for item in &self.display_list {
-                match item {
-                    DisplayListItem::Text { text, format } => {
-                        let galley = ui.painter().layout_no_wrap(
-                            text.to_string(),
-                            format.font_id.clone(),
-                            format.color,
-                        );
-
-                        let galley_space = ui.painter().layout_no_wrap(
-                            " ".to_string(),
-                            format.font_id.clone(),
-                            Default::default(),
-                        );
-
-                        if current_x + galley.rect.width() > ui.min_rect().width() - PADDING {
-                            current_y += galley.rect.height();
-                            current_x = starting_x!(ui);
-                        }
-
-                        let pos = egui::Pos2::new(current_x, current_y);
-
-                        ui.painter().text(
-                            pos,
-                            egui::Align2::LEFT_TOP,
-                            text.clone(),
-                            format.font_id.clone(),
-                            format.color,
-                        );
-
-                        current_x += galley.rect.width() + galley_space.rect.width();
-                    }
-                    DisplayListItem::LineBreak => {
-                        current_x = starting_x!(ui);
-                        current_y += VSTEP;
-                    }
-                }
+            for item in display_list {
+                ui.painter().text(
+                    item.pos,
+                    egui::Align2::LEFT_TOP,
+                    item.text_with_format.text.clone(),
+                    item.text_with_format.format.font_id.clone(),
+                    item.text_with_format.format.color,
+                );
             }
         });
     }
@@ -104,39 +77,40 @@ impl Default for Browser {
         Self {
             url: "about:blank".to_string(),
             engine: Default::default(),
-            display_list: vec![],
+            processed_tokens: vec![],
         }
     }
 }
 
 #[derive(Debug, Clone)]
-enum DisplayListItem {
-    Text {
-        text: String,
-        format: egui::TextFormat,
-    },
-    LineBreak,
+struct TextWithFormat {
+    text: String,
+    format: egui::TextFormat,
 }
 
-impl DisplayListItem {
-    fn new_text(text: String, format: egui::TextFormat) -> Self {
-        Self::Text { text, format }
+impl TextWithFormat {
+    fn new(text: String, format: egui::TextFormat) -> Self {
+        Self { text, format }
     }
 }
 
-type DisplayList = Vec<DisplayListItem>;
+#[derive(Debug, Clone)]
+enum ProcessedToken {
+    Text(TextWithFormat),
+    LineBreak,
+}
 
-struct Layout {
-    display_list: DisplayList,
+struct TokenProcessor {
+    processed_tokens: Vec<ProcessedToken>,
     text_size: f32,
     italics: bool,
     color: egui::Color32,
 }
 
-impl Default for Layout {
+impl Default for TokenProcessor {
     fn default() -> Self {
         Self {
-            display_list: vec![],
+            processed_tokens: vec![],
             text_size: DEFAULT_TEXT_SIZE_PIXELS,
             italics: false,
             color: egui::Color32::BLACK,
@@ -144,11 +118,11 @@ impl Default for Layout {
     }
 }
 
-impl Layout {
-    fn display_list(tokens: Vec<Token>) -> DisplayList {
+impl TokenProcessor {
+    fn from_tokens(tokens: Vec<Token>) -> Self {
         let mut layout = Self::default();
         layout.process_all_tokens(tokens);
-        layout.display_list
+        layout
     }
 
     fn process_text(&mut self, text: &str) {
@@ -161,8 +135,11 @@ impl Layout {
             ..Default::default()
         };
         for word in text.split_whitespace() {
-            self.display_list
-                .push(DisplayListItem::new_text(word.to_string(), format.clone()))
+            self.processed_tokens
+                .push(ProcessedToken::Text(TextWithFormat::new(
+                    word.to_string(),
+                    format.clone(),
+                )))
         }
     }
 
@@ -203,7 +180,7 @@ impl Layout {
                 }
                 "/p" => {
                     self.process_text(" ");
-                    self.display_list.push(DisplayListItem::LineBreak);
+                    self.processed_tokens.push(ProcessedToken::LineBreak);
                 }
                 _ => {}
             },
@@ -213,6 +190,123 @@ impl Layout {
     fn process_all_tokens(&mut self, tokens: Vec<Token>) {
         for token in tokens {
             self.process_token(token);
+        }
+    }
+}
+
+struct LineItem<'a> {
+    text_with_format: &'a TextWithFormat,
+    galley: Arc<egui::Galley>,
+    x: f32,
+}
+
+impl<'a> LineItem<'a> {
+    fn new(text_with_format: &'a TextWithFormat, galley: Arc<egui::Galley>, x: f32) -> Self {
+        Self {
+            galley,
+            text_with_format,
+            x,
+        }
+    }
+}
+
+struct DisplayListItem<'a> {
+    text_with_format: &'a TextWithFormat,
+    pos: egui::Pos2,
+}
+
+impl<'a> DisplayListItem<'a> {
+    fn new(text: &'a TextWithFormat, pos: egui::Pos2) -> Self {
+        Self {
+            text_with_format: text,
+            pos,
+        }
+    }
+}
+
+type DisplayList<'a> = Vec<DisplayListItem<'a>>;
+
+struct Layout<'a, 'b> {
+    display_list: DisplayList<'a>,
+    line: Vec<LineItem<'a>>,
+    ui: &'b egui::Ui,
+    current_x: f32,
+    current_y: f32,
+}
+
+impl<'a, 'b> Layout<'a, 'b> {
+    fn display_list(
+        processed_tokens: &'a [ProcessedToken],
+        ui: &'b egui::Ui,
+        padding_top: f32,
+    ) -> DisplayList<'a> {
+        let mut layout = Layout {
+            display_list: vec![],
+            line: vec![],
+            ui,
+            current_x: starting_x!(ui),
+            current_y: ui.min_rect().top() + padding_top,
+        };
+
+        for token in processed_tokens {
+            layout.push_to_line(token);
+        }
+
+        layout.flush();
+        layout.display_list
+    }
+
+    fn push_to_line(&mut self, token: &'a ProcessedToken) {
+        match token {
+            ProcessedToken::Text(text) => {
+                let galley = self.ui.painter().layout_no_wrap(
+                    text.text.to_string(),
+                    text.format.font_id.clone(),
+                    text.format.color,
+                );
+
+                let galley_space = self.ui.painter().layout_no_wrap(
+                    " ".to_string(),
+                    text.format.font_id.clone(),
+                    Default::default(),
+                );
+
+                if self.current_x + galley.rect.width() > self.ui.min_rect().width() - PADDING {
+                    self.flush();
+                }
+
+                let line_item = LineItem::new(text, Arc::clone(&galley), self.current_x);
+                self.line.push(line_item);
+                self.current_x += galley.rect.width() + galley_space.rect.width();
+            }
+            ProcessedToken::LineBreak => {
+                self.current_x = starting_x!(self.ui);
+                self.current_y += VSTEP;
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        // Get the maximum height of all the galleys in the current line.
+        let max_galley_height = self
+            .line
+            .iter()
+            .map(|item| item.galley.size().y)
+            .reduce(f32::max);
+
+        if let Some(max_ascent) = max_galley_height {
+            let baseline = self.current_y + 1.25 * max_ascent;
+
+            for line_item in &self.line {
+                let y = baseline - line_item.galley.size().y;
+                let pos = egui::Pos2::new(line_item.x, y);
+                self.display_list
+                    .push(DisplayListItem::new(line_item.text_with_format, pos));
+            }
+
+            self.current_y = baseline + 1.25 * max_ascent;
+            self.current_x = starting_x!(self.ui);
+            self.line.clear();
         }
     }
 }
