@@ -1,20 +1,21 @@
-use std::borrow::Cow;
-use std::sync::{mpsc, Arc};
 use thiserror::Error;
 
-use eframe::egui::scroll_area::ScrollBarVisibility;
 use eframe::egui::{Context, Visuals};
 use eframe::{egui, Frame};
 
 use crate::engine::{Engine, EngineError};
 use crate::lex::{lex, Token};
 
-const DEFAULT_LOADING_TEXT: &str = "Loading...";
 const EMPTY_BODY_TEXT: &str = "The response body was empty.";
 const DEFAULT_TEXT_SIZE_PIXELS: f32 = 16.;
-const HSTEP: f32 = 13.;
 const VSTEP: f32 = 18.;
 const PADDING: f32 = 10.;
+
+macro_rules! starting_x {
+    ($ui:expr) => {
+        $ui.min_rect().left()
+    };
+}
 
 #[derive(Error, Debug)]
 pub enum BrowserError {
@@ -51,39 +52,48 @@ impl eframe::App for Browser {
                 }
             }
 
-            let mut current_x = ui.min_rect().left();
+            let mut current_x = starting_x!(ui);
 
             // Show below the address bar
             let mut current_y = ui.min_rect().top() + response.rect.height() + PADDING;
 
             for item in &self.display_list {
-                let galley = ui.painter().layout_no_wrap(
-                    item.text.to_string(),
-                    item.format.font_id.clone(),
-                    item.format.color,
-                );
+                match item {
+                    DisplayListItem::Text { text, format } => {
+                        let galley = ui.painter().layout_no_wrap(
+                            text.to_string(),
+                            format.font_id.clone(),
+                            format.color,
+                        );
 
-                let galley_space = ui.painter().layout_no_wrap(
-                    " ".to_string(),
-                    item.format.font_id.clone(),
-                    Default::default(),
-                );
+                        let galley_space = ui.painter().layout_no_wrap(
+                            " ".to_string(),
+                            format.font_id.clone(),
+                            Default::default(),
+                        );
 
-                if current_x + galley.rect.width() > ui.min_rect().width() - PADDING {
-                    current_y += galley.rect.height();
-                    current_x = ui.min_rect().left();
+                        if current_x + galley.rect.width() > ui.min_rect().width() - PADDING {
+                            current_y += galley.rect.height();
+                            current_x = starting_x!(ui);
+                        }
+
+                        let pos = egui::Pos2::new(current_x, current_y);
+
+                        ui.painter().text(
+                            pos,
+                            egui::Align2::LEFT_TOP,
+                            text.clone(),
+                            format.font_id.clone(),
+                            format.color,
+                        );
+
+                        current_x += galley.rect.width() + galley_space.rect.width();
+                    }
+                    DisplayListItem::LineBreak => {
+                        current_x = starting_x!(ui);
+                        current_y += VSTEP;
+                    }
                 }
-
-                let pos = egui::Pos2::new(current_x, current_y);
-
-                ui.painter().text(
-                    pos,
-                    egui::Align2::LEFT_TOP,
-                    item.text.clone(),
-                    item.format.font_id.clone(),
-                    item.format.color,
-                );
-                current_x += galley.rect.width() + galley_space.rect.width();
             }
         });
     }
@@ -100,14 +110,17 @@ impl Default for Browser {
 }
 
 #[derive(Debug, Clone)]
-struct DisplayListItem {
-    text: String,
-    format: egui::TextFormat,
+enum DisplayListItem {
+    Text {
+        text: String,
+        format: egui::TextFormat,
+    },
+    LineBreak,
 }
 
 impl DisplayListItem {
-    fn new(text: String, format: egui::TextFormat) -> Self {
-        Self { text, format }
+    fn new_text(text: String, format: egui::TextFormat) -> Self {
+        Self::Text { text, format }
     }
 }
 
@@ -149,7 +162,7 @@ impl Layout {
         };
         for word in text.split_whitespace() {
             self.display_list
-                .push(DisplayListItem::new(word.to_string(), format.clone()))
+                .push(DisplayListItem::new_text(word.to_string(), format.clone()))
         }
     }
 
@@ -186,29 +199,21 @@ impl Layout {
                 "sup" => {}
                 "/sup" => {}
                 "br" => {
-                    self.flush();
+                    self.process_text(" ");
                 }
                 "/p" => {
-                    self.flush();
-                    // We ultimately want to add line separation here in the layout,
-                    // not just a newline.
-                    self.flush();
+                    self.process_text(" ");
+                    self.display_list.push(DisplayListItem::LineBreak);
                 }
                 _ => {}
             },
         }
     }
 
-    fn flush(&mut self) {
-        self.display_list
-            .push(DisplayListItem::new("\n".to_string(), Default::default()))
-    }
-
     fn process_all_tokens(&mut self, tokens: Vec<Token>) {
         for token in tokens {
             self.process_token(token);
         }
-        self.flush();
     }
 }
 
