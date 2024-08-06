@@ -1,11 +1,10 @@
-use std::sync::OnceLock;
+use std::borrow::Cow;
+use std::sync::{mpsc, Arc};
 use thiserror::Error;
 
-use iced::font::{Family, Style, Weight};
-use iced::futures::{channel::mpsc, SinkExt, Stream, StreamExt};
-use iced::widget::text::{Rich, Span};
-use iced::widget::{column, row, scrollable, text_input, Column, TextInput};
-use iced::{stream, window, Element, Fill, Font, Size, Subscription, Task, Theme};
+use eframe::egui::scroll_area::ScrollBarVisibility;
+use eframe::egui::{Context, Visuals};
+use eframe::{egui, Frame};
 
 use crate::engine::{Engine, EngineError};
 use crate::lex::{lex, Token};
@@ -13,6 +12,9 @@ use crate::lex::{lex, Token};
 const DEFAULT_LOADING_TEXT: &str = "Loading...";
 const EMPTY_BODY_TEXT: &str = "The response body was empty.";
 const DEFAULT_TEXT_SIZE_PIXELS: f32 = 16.;
+const HSTEP: f32 = 13.;
+const VSTEP: f32 = 18.;
+const PADDING: f32 = 10.;
 
 #[derive(Error, Debug)]
 pub enum BrowserError {
@@ -20,169 +22,154 @@ pub enum BrowserError {
     Engine(#[from] EngineError),
 }
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    Ready(mpsc::Sender<String>),
-    Scrolled(scrollable::Viewport),
-    UrlChanged(String),
-    NewUrl,
-    UrlLoaded(Vec<Token>),
-    UrlLoading,
-    WindowResized(Size),
-}
-
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Browser {
     url: String,
-    url_sender: OnceLock<mpsc::Sender<String>>,
-    tokens: Vec<Token>,
-    scrollbar_width: u16,
-    scrollbar_margin: u16,
-    scroller_width: u16,
-    current_scroll_offset: scrollable::RelativeOffset,
-    anchor: scrollable::Anchor,
-    current_size: Option<Size>,
+    engine: Engine,
+    display_list: DisplayList,
 }
 
-impl Browser {
-    pub fn new() -> (Self, Task<Message>) {
-        (
-            Self {
-                url: "about:blank".to_string(),
-                url_sender: OnceLock::new(),
-                tokens: vec![],
-                scrollbar_width: 10,
-                scrollbar_margin: 0,
-                scroller_width: 10,
-                current_scroll_offset: scrollable::RelativeOffset::START,
-                anchor: scrollable::Anchor::Start,
-                current_size: None,
-            },
-            Task::none(),
-        )
-    }
+impl eframe::App for Browser {
+    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ctx.set_visuals(Visuals::light());
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::Ready(sender) => {
-                self.url_sender
-                    .set(sender)
-                    .expect("Couldn't set the sender");
-                Task::none()
+            ui.spacing_mut().text_edit_width = ui.max_rect().width();
+
+            let response = ui.add(egui::TextEdit::singleline(&mut self.url));
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                match self.engine.load(&self.url) {
+                    Ok(Some(tokens)) => {
+                        self.display_list = Layout::display_list(tokens);
+                    }
+                    Ok(None) => {
+                        self.display_list = Layout::display_list(lex(EMPTY_BODY_TEXT, true));
+                    }
+                    Err(error) => {
+                        ui.label(error.to_string());
+                    }
+                }
             }
-            Message::WindowResized(size) => {
-                self.current_size = Some(size);
-                Task::none()
+
+            let mut current_x = ui.min_rect().left();
+
+            // Show below the address bar
+            let mut current_y = ui.min_rect().top() + response.rect.height() + PADDING;
+
+            for item in &self.display_list {
+                let galley = ui.painter().layout_no_wrap(
+                    item.text.to_string(),
+                    item.format.font_id.clone(),
+                    item.format.color,
+                );
+
+                let galley_space = ui.painter().layout_no_wrap(
+                    " ".to_string(),
+                    item.format.font_id.clone(),
+                    Default::default(),
+                );
+
+                if current_x + galley.rect.width() > ui.min_rect().width() - PADDING {
+                    current_y += galley.rect.height();
+                    current_x = ui.min_rect().left();
+                }
+
+                let pos = egui::Pos2::new(current_x, current_y);
+
+                ui.painter().text(
+                    pos,
+                    egui::Align2::LEFT_TOP,
+                    item.text.clone(),
+                    item.format.font_id.clone(),
+                    item.format.color,
+                );
+                current_x += galley.rect.width() + galley_space.rect.width();
             }
-            Message::Scrolled(viewport) => {
-                self.current_scroll_offset = viewport.relative_offset();
-                Task::none()
-            }
-            Message::UrlChanged(new_url) => {
-                self.url = new_url;
-                Task::none()
-            }
-            Message::NewUrl => {
-                let sender = self
-                    .url_sender
-                    .get_mut()
-                    .expect("The sender should be initialized.");
-                sender
-                    .try_send(self.url.clone())
-                    .expect("Couldn't send the url");
-                Task::none()
-            }
-            Message::UrlLoading => {
-                self.tokens = lex(DEFAULT_LOADING_TEXT, true);
-                Task::none()
-            }
-            Message::UrlLoaded(tokens) => {
-                self.tokens = tokens;
-                Task::none()
-            }
+        });
+    }
+}
+
+impl Default for Browser {
+    fn default() -> Self {
+        Self {
+            url: "about:blank".to_string(),
+            engine: Default::default(),
+            display_list: vec![],
         }
     }
+}
 
-    pub fn view(&self) -> Element<Message> {
-        let url_input = {
-            let mut input: TextInput<_, Theme> = text_input("Enter a URL", &self.url)
-                .on_input(Message::UrlChanged)
-                .padding(10);
-            input = input.on_submit(Message::NewUrl);
-            row![input]
-        };
+#[derive(Debug, Clone)]
+struct DisplayListItem {
+    text: String,
+    format: egui::TextFormat,
+}
 
-        let display_list = Layout::make_display_list(&self.tokens);
-        let content = Rich::with_spans(display_list).width(Fill);
-
-        let scrollable_content: Element<Message> = Element::from(scrollable(content).width(Fill));
-        let column: Column<_> = column![url_input, scrollable_content];
-        column.width(Fill).padding(5).into()
-    }
-
-    pub fn theme(&self) -> Theme {
-        Theme::Light
-    }
-
-    pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([self.url_subscription(), self.resize_subscription()])
-    }
-
-    fn url_subscription(&self) -> Subscription<Message> {
-        Subscription::run(url_worker)
-    }
-
-    pub fn resize_subscription(&self) -> Subscription<Message> {
-        window::resize_events().map(|(_id, size)| Message::WindowResized(size))
+impl DisplayListItem {
+    fn new(text: String, format: egui::TextFormat) -> Self {
+        Self { text, format }
     }
 }
 
-type DisplayList<'a> = Vec<Span<'a, Message>>;
+type DisplayList = Vec<DisplayListItem>;
 
-struct Layout<'a> {
-    display_list: DisplayList<'a>,
+struct Layout {
+    display_list: DisplayList,
     text_size: f32,
-    style: Style,
-    weight: Weight,
+    italics: bool,
+    color: egui::Color32,
 }
 
-impl<'a> Layout<'a> {
-    fn make_display_list(tokens: &'a [Token]) -> DisplayList {
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            display_list: vec![],
+            text_size: DEFAULT_TEXT_SIZE_PIXELS,
+            italics: false,
+            color: egui::Color32::BLACK,
+        }
+    }
+}
+
+impl Layout {
+    fn display_list(tokens: Vec<Token>) -> DisplayList {
         let mut layout = Self::default();
         layout.process_all_tokens(tokens);
         layout.display_list
     }
 
-    fn process_text(&mut self, text: &'a str) {
-        let font = Font {
-            family: Family::Serif,
-            style: self.style,
-            weight: self.weight,
+    fn process_text(&mut self, text: &str) {
+        let font_id = egui::FontId::new(self.text_size, egui::FontFamily::Proportional);
+        let format = egui::text::TextFormat {
+            font_id,
+            italics: self.italics,
+            color: self.color,
+            valign: egui::Align::Min,
             ..Default::default()
         };
-
-        let span: Span<Message> = Span::new(text).size(self.text_size).font(font);
-        self.display_list.push(span);
+        for word in text.split_whitespace() {
+            self.display_list
+                .push(DisplayListItem::new(word.to_string(), format.clone()))
+        }
     }
 
-    fn process_token(&mut self, token: &'a Token) {
+    fn process_token(&mut self, token: Token) {
         match token {
             Token::Text(text) => {
                 self.process_text(text.as_str());
             }
             Token::Tag(tag) => match tag.as_str() {
                 "i" => {
-                    self.style = Style::Italic;
+                    self.italics = true;
                 }
                 "/i" => {
-                    self.style = Style::default();
+                    self.italics = false;
                 }
                 "b" => {
-                    self.weight = Weight::Bold;
+                    self.color = egui::Color32::BLACK;
                 }
                 "/b" => {
-                    self.weight = Weight::Normal;
+                    self.color = Default::default();
                 }
                 "small" => {
                     self.text_size -= 2.;
@@ -213,61 +200,16 @@ impl<'a> Layout<'a> {
     }
 
     fn flush(&mut self) {
-        self.display_list.push(Span::new('\n'));
+        self.display_list
+            .push(DisplayListItem::new("\n".to_string(), Default::default()))
     }
 
-    fn process_all_tokens(&mut self, tokens: &'a [Token]) {
+    fn process_all_tokens(&mut self, tokens: Vec<Token>) {
         for token in tokens {
             self.process_token(token);
         }
         self.flush();
     }
-}
-
-impl<'a> Default for Layout<'a> {
-    fn default() -> Self {
-        Self {
-            display_list: vec![],
-            text_size: DEFAULT_TEXT_SIZE_PIXELS,
-            style: Style::default(),
-            weight: Weight::default(),
-        }
-    }
-}
-
-fn url_worker() -> impl Stream<Item = Message> {
-    stream::channel(100, |mut output| async move {
-        let (sender, mut receiver) = mpsc::channel(100);
-        output
-            .send(Message::Ready(sender))
-            .await
-            .expect("Couldn't send the Ready event");
-        let mut engine = Engine::default();
-
-        loop {
-            let new_url = receiver.select_next_some().await;
-
-            output
-                .send(Message::UrlLoading)
-                .await
-                .expect("Couldn't send the message");
-
-            let tokens = match engine.load(new_url.as_str()) {
-                Ok(tokens) => tokens,
-                Err(error) => {
-                    eprintln!("{error}");
-                    continue;
-                }
-            };
-
-            let tokens = tokens.unwrap_or_else(|| lex(EMPTY_BODY_TEXT, true));
-
-            output
-                .send(Message::UrlLoaded(tokens))
-                .await
-                .expect("Couldn't send the body");
-        }
-    })
 }
 
 #[cfg(test)]

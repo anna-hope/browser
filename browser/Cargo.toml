@@ -9,7 +9,7 @@ thiserror = { workspace = true }
 unicode-segmentation = "1.11.0"
 octo-http = { path = "../http" }
 octo-url = { path = "../url" }
-egui = "0.28.1"
+eframe = { version = "0.28.1", features = ["wgpu"] }
 
 [lints]
 workspace = true
