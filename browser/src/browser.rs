@@ -71,11 +71,15 @@ impl eframe::App for Browser {
                 }
             }
 
-            let display_list =
-                Layout::display_list(&self.processed_tokens, ui, PADDING + response.rect.height());
+            let display_list = Layout::display_list(&self.processed_tokens, ui);
 
+            // Account for the address bar;
+            let top_margin = PADDING + response.rect.height();
             for item in display_list {
-                let pos = egui::Pos2::new(item.pos.x, item.pos.y - self.scroll);
+                let pos = egui::Pos2::new(item.pos.x, item.pos.y - self.scroll + top_margin);
+                if pos.y < top_margin || pos.y > ui.min_rect().bottom() {
+                    continue;
+                }
                 ui.painter().galley(pos, item.galley, Default::default());
             }
         });
@@ -224,17 +228,13 @@ struct Layout<'a> {
 }
 
 impl<'a> Layout<'a> {
-    fn display_list(
-        processed_tokens: &[ProcessedToken],
-        ui: &'a egui::Ui,
-        padding_top: f32,
-    ) -> DisplayList {
+    fn display_list(processed_tokens: &[ProcessedToken], ui: &'a egui::Ui) -> DisplayList {
         let mut layout = Layout {
             display_list: vec![],
             line: vec![],
             ui,
             current_x: starting_x!(ui),
-            current_y: ui.min_rect().top() + padding_top,
+            current_y: ui.min_rect().top(),
         };
 
         for token in processed_tokens {
