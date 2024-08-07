@@ -235,7 +235,7 @@ impl<'a> Layout<'a> {
                 let galley = self.ui.painter().layout_job(layout_job.clone());
                 let font_id = layout_job
                     .sections
-                    .get(0)
+                    .first()
                     .map(|s| s.format.font_id.clone())
                     .unwrap_or_default();
 
