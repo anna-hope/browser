@@ -1,18 +1,23 @@
-use std::sync::OnceLock;
+use std::sync::Arc;
 use thiserror::Error;
 
-use iced::font::{Family, Style, Weight};
-use iced::futures::{channel::mpsc, SinkExt, Stream, StreamExt};
-use iced::widget::text::{Rich, Span};
-use iced::widget::{column, row, scrollable, text_input, Column, TextInput};
-use iced::{stream, window, Element, Fill, Font, Size, Subscription, Task, Theme};
+use eframe::egui::{Context, Visuals};
+use eframe::{egui, Frame};
 
 use crate::engine::{Engine, EngineError};
 use crate::lex::{lex, Token};
 
-const DEFAULT_LOADING_TEXT: &str = "Loading...";
 const EMPTY_BODY_TEXT: &str = "The response body was empty.";
 const DEFAULT_TEXT_SIZE_PIXELS: f32 = 16.;
+const VSTEP: f32 = 18.;
+const PADDING: f32 = 10.;
+const SCROLL_STEP: f32 = 100.;
+
+macro_rules! starting_x {
+    ($ui:expr) => {
+        $ui.min_rect().left()
+    };
+}
 
 #[derive(Error, Debug)]
 pub enum BrowserError {
@@ -20,169 +25,143 @@ pub enum BrowserError {
     Engine(#[from] EngineError),
 }
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    Ready(mpsc::Sender<String>),
-    Scrolled(scrollable::Viewport),
-    UrlChanged(String),
-    NewUrl,
-    UrlLoaded(Vec<Token>),
-    UrlLoading,
-    WindowResized(Size),
-}
-
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Browser {
     url: String,
-    url_sender: OnceLock<mpsc::Sender<String>>,
-    tokens: Vec<Token>,
-    scrollbar_width: u16,
-    scrollbar_margin: u16,
-    scroller_width: u16,
-    current_scroll_offset: scrollable::RelativeOffset,
-    anchor: scrollable::Anchor,
-    current_size: Option<Size>,
+    engine: Engine,
+    processed_tokens: Vec<ProcessedToken>,
+    scroll: f32,
 }
 
-impl Browser {
-    pub fn new() -> (Self, Task<Message>) {
-        (
-            Self {
-                url: "about:blank".to_string(),
-                url_sender: OnceLock::new(),
-                tokens: vec![],
-                scrollbar_width: 10,
-                scrollbar_margin: 0,
-                scroller_width: 10,
-                current_scroll_offset: scrollable::RelativeOffset::START,
-                anchor: scrollable::Anchor::Start,
-                current_size: None,
-            },
-            Task::none(),
-        )
+impl eframe::App for Browser {
+    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ctx.set_visuals(Visuals::light());
+
+            ui.spacing_mut().text_edit_width = ui.max_rect().width();
+
+            // Scroll up
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                self.scroll = f32::max(self.scroll - SCROLL_STEP, 0.);
+            }
+
+            // Scroll down
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                self.scroll += SCROLL_STEP;
+            }
+
+            // Mouse wheel
+            ui.input(|i| self.scroll = f32::max(self.scroll + i.smooth_scroll_delta.y, 0.));
+
+            let response = ui.add(egui::TextEdit::singleline(&mut self.url));
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                self.scroll = 0.;
+                match self.engine.load(&self.url) {
+                    Ok(Some(tokens)) => {
+                        self.processed_tokens =
+                            TokenProcessor::from_tokens(tokens).processed_tokens;
+                    }
+                    Ok(None) => {
+                        self.processed_tokens =
+                            TokenProcessor::from_tokens(lex(EMPTY_BODY_TEXT, true))
+                                .processed_tokens;
+                    }
+                    Err(error) => {
+                        ui.label(error.to_string());
+                    }
+                }
+            }
+
+            let display_list = Layout::display_list(&self.processed_tokens, ui);
+
+            // Account for the address bar;
+            let top_margin = PADDING + response.rect.height();
+            for item in display_list {
+                let pos = egui::Pos2::new(item.pos.x, item.pos.y - self.scroll + top_margin);
+                if pos.y < top_margin || pos.y > ui.min_rect().bottom() {
+                    continue;
+                }
+                ui.painter().galley(pos, item.galley, Default::default());
+            }
+        });
+    }
+}
+
+impl Default for Browser {
+    fn default() -> Self {
+        Self {
+            url: "about:blank".to_string(),
+            engine: Default::default(),
+            processed_tokens: vec![],
+            scroll: 0.,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum ProcessedToken {
+    Text(egui::text::LayoutJob),
+    LineBreak,
+}
+
+struct TokenProcessor {
+    processed_tokens: Vec<ProcessedToken>,
+    text_size: f32,
+    italics: bool,
+    color: egui::Color32,
+}
+
+impl Default for TokenProcessor {
+    fn default() -> Self {
+        Self {
+            processed_tokens: vec![],
+            text_size: DEFAULT_TEXT_SIZE_PIXELS,
+            italics: false,
+            color: egui::Color32::BLACK,
+        }
+    }
+}
+
+impl TokenProcessor {
+    fn from_tokens(tokens: Vec<Token>) -> Self {
+        let mut layout = Self::default();
+        layout.process_all_tokens(tokens);
+        layout
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::Ready(sender) => {
-                self.url_sender
-                    .set(sender)
-                    .expect("Couldn't set the sender");
-                Task::none()
-            }
-            Message::WindowResized(size) => {
-                self.current_size = Some(size);
-                Task::none()
-            }
-            Message::Scrolled(viewport) => {
-                self.current_scroll_offset = viewport.relative_offset();
-                Task::none()
-            }
-            Message::UrlChanged(new_url) => {
-                self.url = new_url;
-                Task::none()
-            }
-            Message::NewUrl => {
-                let sender = self
-                    .url_sender
-                    .get_mut()
-                    .expect("The sender should be initialized.");
-                sender
-                    .try_send(self.url.clone())
-                    .expect("Couldn't send the url");
-                Task::none()
-            }
-            Message::UrlLoading => {
-                self.tokens = lex(DEFAULT_LOADING_TEXT, true);
-                Task::none()
-            }
-            Message::UrlLoaded(tokens) => {
-                self.tokens = tokens;
-                Task::none()
-            }
+    fn process_text(&mut self, text: &str) {
+        let font_id = egui::FontId::new(self.text_size, egui::FontFamily::Proportional);
+        let format = egui::text::TextFormat {
+            font_id,
+            italics: self.italics,
+            color: self.color,
+            valign: egui::Align::Min,
+            ..Default::default()
+        };
+        for word in text.split_whitespace() {
+            let mut layout_job = egui::text::LayoutJob::default();
+            layout_job.append(word, 0.0, format.clone());
+            self.processed_tokens.push(ProcessedToken::Text(layout_job));
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
-        let url_input = {
-            let mut input: TextInput<_, Theme> = text_input("Enter a URL", &self.url)
-                .on_input(Message::UrlChanged)
-                .padding(10);
-            input = input.on_submit(Message::NewUrl);
-            row![input]
-        };
-
-        let display_list = Layout::make_display_list(&self.tokens);
-        let content = Rich::with_spans(display_list).width(Fill);
-
-        let scrollable_content: Element<Message> = Element::from(scrollable(content).width(Fill));
-        let column: Column<_> = column![url_input, scrollable_content];
-        column.width(Fill).padding(5).into()
-    }
-
-    pub fn theme(&self) -> Theme {
-        Theme::Light
-    }
-
-    pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([self.url_subscription(), self.resize_subscription()])
-    }
-
-    fn url_subscription(&self) -> Subscription<Message> {
-        Subscription::run(url_worker)
-    }
-
-    pub fn resize_subscription(&self) -> Subscription<Message> {
-        window::resize_events().map(|(_id, size)| Message::WindowResized(size))
-    }
-}
-
-type DisplayList<'a> = Vec<Span<'a, Message>>;
-
-struct Layout<'a> {
-    display_list: DisplayList<'a>,
-    text_size: f32,
-    style: Style,
-    weight: Weight,
-}
-
-impl<'a> Layout<'a> {
-    fn make_display_list(tokens: &'a [Token]) -> DisplayList {
-        let mut layout = Self::default();
-        layout.process_all_tokens(tokens);
-        layout.display_list
-    }
-
-    fn process_text(&mut self, text: &'a str) {
-        let font = Font {
-            family: Family::Serif,
-            style: self.style,
-            weight: self.weight,
-            ..Default::default()
-        };
-
-        let span: Span<Message> = Span::new(text).size(self.text_size).font(font);
-        self.display_list.push(span);
-    }
-
-    fn process_token(&mut self, token: &'a Token) {
+    fn process_token(&mut self, token: Token) {
         match token {
             Token::Text(text) => {
                 self.process_text(text.as_str());
             }
             Token::Tag(tag) => match tag.as_str() {
                 "i" => {
-                    self.style = Style::Italic;
+                    self.italics = true;
                 }
                 "/i" => {
-                    self.style = Style::default();
+                    self.italics = false;
                 }
                 "b" => {
-                    self.weight = Weight::Bold;
+                    self.color = egui::Color32::BLACK;
                 }
                 "/b" => {
-                    self.weight = Weight::Normal;
+                    self.color = Default::default();
                 }
                 "small" => {
                     self.text_size -= 2.;
@@ -199,75 +178,144 @@ impl<'a> Layout<'a> {
                 "sup" => {}
                 "/sup" => {}
                 "br" => {
-                    self.flush();
+                    self.process_text("\n");
                 }
                 "/p" => {
-                    self.flush();
-                    // We ultimately want to add line separation here in the layout,
-                    // not just a newline.
-                    self.flush();
+                    self.process_text("\n");
+                    self.processed_tokens.push(ProcessedToken::LineBreak);
                 }
                 _ => {}
             },
         }
     }
 
-    fn flush(&mut self) {
-        self.display_list.push(Span::new('\n'));
-    }
-
-    fn process_all_tokens(&mut self, tokens: &'a [Token]) {
+    fn process_all_tokens(&mut self, tokens: Vec<Token>) {
         for token in tokens {
             self.process_token(token);
         }
-        self.flush();
     }
 }
 
-impl<'a> Default for Layout<'a> {
-    fn default() -> Self {
-        Self {
+struct LineItem {
+    galley: Arc<egui::Galley>,
+    x: f32,
+}
+
+impl LineItem {
+    fn new(galley: Arc<egui::Galley>, x: f32) -> Self {
+        Self { galley, x }
+    }
+}
+
+struct DisplayListItem {
+    galley: Arc<egui::Galley>,
+    pos: egui::Pos2,
+}
+
+impl DisplayListItem {
+    fn new(galley: Arc<egui::Galley>, pos: egui::Pos2) -> Self {
+        Self { galley, pos }
+    }
+}
+
+type DisplayList = Vec<DisplayListItem>;
+
+struct Layout<'a> {
+    display_list: DisplayList,
+    line: Vec<LineItem>,
+    ui: &'a egui::Ui,
+    current_x: f32,
+    current_y: f32,
+}
+
+impl<'a> Layout<'a> {
+    fn display_list(processed_tokens: &[ProcessedToken], ui: &'a egui::Ui) -> DisplayList {
+        let mut layout = Layout {
             display_list: vec![],
-            text_size: DEFAULT_TEXT_SIZE_PIXELS,
-            style: Style::default(),
-            weight: Weight::default(),
+            line: vec![],
+            ui,
+            current_x: starting_x!(ui),
+            current_y: ui.min_rect().top(),
+        };
+
+        for token in processed_tokens {
+            layout.push_to_line(token);
+        }
+
+        layout.flush();
+        layout.display_list
+    }
+
+    fn push_to_line(&mut self, token: &ProcessedToken) {
+        match token {
+            ProcessedToken::Text(layout_job) => {
+                let galley = self.ui.painter().layout_job(layout_job.clone());
+                let font_id = layout_job
+                    .sections
+                    .first()
+                    .map(|s| s.format.font_id.clone())
+                    .unwrap_or_default();
+
+                let galley_space =
+                    self.ui
+                        .painter()
+                        .layout_no_wrap(" ".to_string(), font_id, Default::default());
+
+                if self.current_x + galley.rect.width() > self.ui.min_rect().width() - PADDING {
+                    self.flush();
+                }
+
+                let line_item = LineItem::new(Arc::clone(&galley), self.current_x);
+                self.line.push(line_item);
+                self.current_x += galley.rect.width() + galley_space.rect.width();
+            }
+            ProcessedToken::LineBreak => {
+                self.flush();
+                self.current_y += VSTEP;
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        // Get the maximum height of all the galleys in the current line.
+        let max_ascent = self
+            .line
+            .iter()
+            .flat_map(|item| get_max_ascent(&item.galley))
+            .reduce(f32::max);
+
+        let max_descent = self
+            .line
+            .iter()
+            .map(|item| item.galley.mesh_bounds.bottom() - item.galley.mesh_bounds.center().y)
+            .reduce(f32::max);
+
+        if let (Some(max_ascent), Some(max_descent)) = (max_ascent, max_descent) {
+            let baseline = self.current_y + 1.25 * max_ascent;
+
+            for line_item in &self.line {
+                let ascent = get_max_ascent(&line_item.galley).unwrap_or_default();
+                let y = baseline - ascent;
+                let pos = egui::Pos2::new(line_item.x, y);
+                self.display_list
+                    .push(DisplayListItem::new(Arc::clone(&line_item.galley), pos));
+            }
+
+            self.current_y = baseline + 1.25 * max_descent;
+            self.current_x = starting_x!(self.ui);
+            self.line.clear();
         }
     }
 }
 
-fn url_worker() -> impl Stream<Item = Message> {
-    stream::channel(100, |mut output| async move {
-        let (sender, mut receiver) = mpsc::channel(100);
-        output
-            .send(Message::Ready(sender))
-            .await
-            .expect("Couldn't send the Ready event");
-        let mut engine = Engine::default();
-
-        loop {
-            let new_url = receiver.select_next_some().await;
-
-            output
-                .send(Message::UrlLoading)
-                .await
-                .expect("Couldn't send the message");
-
-            let tokens = match engine.load(new_url.as_str()) {
-                Ok(tokens) => tokens,
-                Err(error) => {
-                    eprintln!("{error}");
-                    continue;
-                }
-            };
-
-            let tokens = tokens.unwrap_or_else(|| lex(EMPTY_BODY_TEXT, true));
-
-            output
-                .send(Message::UrlLoaded(tokens))
-                .await
-                .expect("Couldn't send the body");
-        }
-    })
+#[inline]
+fn get_max_ascent(galley: &egui::Galley) -> Option<f32> {
+    galley
+        .rows
+        .iter()
+        .flat_map(|row| &row.glyphs)
+        .map(|glyph| glyph.ascent)
+        .reduce(f32::max)
 }
 
 #[cfg(test)]

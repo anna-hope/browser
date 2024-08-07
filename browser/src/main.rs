@@ -1,20 +1,15 @@
-use iced::window::Settings;
-use iced::Size;
+use eframe::egui;
 
 use octo_browser::Browser;
 
 const TITLE: &str = "Octo";
 
-fn main() -> iced::Result {
-    let size = Size::new(800., 600.);
-    let settings = Settings {
-        size,
+fn main() -> eframe::Result {
+    let size = [800., 600.];
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size(size),
         ..Default::default()
     };
 
-    iced::application(TITLE, Browser::update, Browser::view)
-        .theme(Browser::theme)
-        .window(settings)
-        .subscription(Browser::subscription)
-        .run_with(Browser::new)
+    eframe::run_native(TITLE, options, Box::new(|_| Ok(Box::<Browser>::default())))
 }

@@ -5,11 +5,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-iced = { git = "https://github.com/iced-rs/iced.git", rev = "fd593f8", features = ["advanced"] }
 thiserror = { workspace = true }
 unicode-segmentation = "1.11.0"
 octo-http = { path = "../http" }
 octo-url = { path = "../url" }
+eframe = { version = "0.28.1", features = ["wgpu"] }
 
 [lints]
 workspace = true
