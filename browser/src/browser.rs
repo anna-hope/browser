@@ -176,10 +176,10 @@ impl TokenProcessor {
                 "sup" => {}
                 "/sup" => {}
                 "br" => {
-                    self.process_text(" ");
+                    self.process_text("\n");
                 }
                 "/p" => {
-                    self.process_text(" ");
+                    self.process_text("\n");
                     self.processed_tokens.push(ProcessedToken::LineBreak);
                 }
                 _ => {}
@@ -280,7 +280,7 @@ impl<'a, 'b> Layout<'a, 'b> {
                 self.current_x += galley.rect.width() + galley_space.rect.width();
             }
             ProcessedToken::LineBreak => {
-                self.current_x = starting_x!(self.ui);
+                self.flush();
                 self.current_y += VSTEP;
             }
         }
@@ -288,27 +288,44 @@ impl<'a, 'b> Layout<'a, 'b> {
 
     fn flush(&mut self) {
         // Get the maximum height of all the galleys in the current line.
-        let max_galley_height = self
+        let max_ascent = self
             .line
             .iter()
-            .map(|item| item.galley.size().y)
+            .flat_map(|item| get_max_ascent(&item.galley))
             .reduce(f32::max);
 
-        if let Some(max_ascent) = max_galley_height {
+        let max_descent = self
+            .line
+            .iter()
+            .map(|item| item.galley.mesh_bounds.bottom() - item.galley.mesh_bounds.center().y)
+            .reduce(f32::max);
+
+        if let (Some(max_ascent), Some(max_descent)) = (max_ascent, max_descent) {
             let baseline = self.current_y + 1.25 * max_ascent;
 
             for line_item in &self.line {
-                let y = baseline - line_item.galley.size().y;
+                let ascent = get_max_ascent(&line_item.galley).unwrap_or_default();
+                let y = baseline - ascent;
                 let pos = egui::Pos2::new(line_item.x, y);
                 self.display_list
                     .push(DisplayListItem::new(line_item.text_with_format, pos));
             }
 
-            self.current_y = baseline + 1.25 * max_ascent;
+            self.current_y = baseline + 1.25 * max_descent;
             self.current_x = starting_x!(self.ui);
             self.line.clear();
         }
     }
+}
+
+#[inline]
+fn get_max_ascent(galley: &egui::Galley) -> Option<f32> {
+    galley
+        .rows
+        .iter()
+        .flat_map(|row| &row.glyphs)
+        .map(|glyph| glyph.ascent)
+        .reduce(f32::max)
 }
 
 #[cfg(test)]
