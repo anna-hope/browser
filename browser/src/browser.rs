@@ -11,6 +11,7 @@ const EMPTY_BODY_TEXT: &str = "The response body was empty.";
 const DEFAULT_TEXT_SIZE_PIXELS: f32 = 16.;
 const VSTEP: f32 = 18.;
 const PADDING: f32 = 10.;
+const SCROLL_STEP: f32 = 100.;
 
 macro_rules! starting_x {
     ($ui:expr) => {
@@ -29,6 +30,7 @@ pub struct Browser {
     url: String,
     engine: Engine,
     processed_tokens: Vec<ProcessedToken>,
+    scroll: f32,
 }
 
 impl eframe::App for Browser {
@@ -37,6 +39,14 @@ impl eframe::App for Browser {
             ctx.set_visuals(Visuals::light());
 
             ui.spacing_mut().text_edit_width = ui.max_rect().width();
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                self.scroll = f32::max(self.scroll - SCROLL_STEP, 0.);
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                self.scroll += SCROLL_STEP;
+            }
 
             let response = ui.add(egui::TextEdit::singleline(&mut self.url));
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -60,8 +70,8 @@ impl eframe::App for Browser {
                 Layout::display_list(&self.processed_tokens, ui, PADDING + response.rect.height());
 
             for item in display_list {
-                ui.painter()
-                    .galley(item.pos, item.galley, Default::default());
+                let pos = egui::Pos2::new(item.pos.x, item.pos.y - self.scroll);
+                ui.painter().galley(pos, item.galley, Default::default());
             }
         });
     }
@@ -73,6 +83,7 @@ impl Default for Browser {
             url: "about:blank".to_string(),
             engine: Default::default(),
             processed_tokens: vec![],
+            scroll: 0.,
         }
     }
 }
