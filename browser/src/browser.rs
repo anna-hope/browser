@@ -40,13 +40,18 @@ impl eframe::App for Browser {
 
             ui.spacing_mut().text_edit_width = ui.max_rect().width();
 
+            // Scroll up
             if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                 self.scroll = f32::max(self.scroll - SCROLL_STEP, 0.);
             }
 
+            // Scroll down
             if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
                 self.scroll += SCROLL_STEP;
             }
+
+            // Mouse wheel
+            ui.input(|i| self.scroll = f32::max(self.scroll + i.smooth_scroll_delta.y, 0.));
 
             let response = ui.add(egui::TextEdit::singleline(&mut self.url));
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
