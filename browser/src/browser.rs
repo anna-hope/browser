@@ -59,15 +59,25 @@ impl eframe::App for Browser {
                 }
             }
 
+            let display_list = Layout::display_list(&self.processed_tokens, ui);
+
+            // Account for address bar + padding.
             let top_margin = PADDING + response.rect.height();
 
-            let display_list = Layout::display_list(&self.processed_tokens, ui);
-            let max_y = display_list
+            // Get the max_y (maximum y of all items in the display list)
+            // so that we can't scroll past the bottom of the page.
+            // We add that the height of that item's galley to allow a margin at the bottom,
+            // and then subtract the height of the Ui rect to never scroll past a full page
+            // of visible content.
+            // Finally, we take the max of that (+ top_margin to account for address bar)
+            // and 0 in case the height of the Ui rect
+            // is larger than the max_y we get this way.
+            let max_scroll = display_list
                 .iter()
-                .map(|item| item.pos.y - ui.min_rect().height())
+                .map(|item| item.pos.y + item.galley.rect.height() - ui.min_rect().height())
                 .reduce(f32::max)
-                .unwrap_or(ui.min_rect().bottom())
-                + top_margin;
+                .map(|max_y| f32::max(max_y + top_margin, 0.))
+                .unwrap_or(ui.min_rect().bottom());
 
             // Scroll up
             if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
@@ -76,11 +86,13 @@ impl eframe::App for Browser {
 
             // Scroll down
             if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                self.scroll = f32::min(self.scroll + SCROLL_STEP, max_y);
+                self.scroll = f32::min(self.scroll + SCROLL_STEP, max_scroll);
             }
 
             // Mouse wheel
-            ui.input(|i| self.scroll = (self.scroll - i.smooth_scroll_delta.y).clamp(0., max_y));
+            ui.input(|i| {
+                self.scroll = (self.scroll - i.smooth_scroll_delta.y).clamp(0., max_scroll)
+            });
 
             // Account for the address bar;
             for item in display_list {
