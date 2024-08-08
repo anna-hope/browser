@@ -1,4 +1,4 @@
-use crate::lex::Token;
+use crate::lex::Node;
 use std::sync::Arc;
 
 use eframe::egui;
@@ -38,7 +38,7 @@ impl Default for TokenProcessor {
 }
 
 impl TokenProcessor {
-    pub(crate) fn from_tokens(tokens: Vec<Token>) -> Self {
+    pub(crate) fn from_tokens(tokens: Vec<Node>) -> Self {
         let mut layout = Self::default();
         layout.process_all_tokens(tokens);
         layout
@@ -60,12 +60,12 @@ impl TokenProcessor {
         }
     }
 
-    fn process_token(&mut self, token: Token) {
+    fn process_token(&mut self, token: Node) {
         match token {
-            Token::Text(text) => {
+            Node::Text(text) => {
                 self.process_text(text.as_str());
             }
-            Token::Element(tag) => match tag.as_str() {
+            Node::Element(tag) => match tag.as_str() {
                 "i" => {
                     self.italics = true;
                 }
@@ -104,7 +104,7 @@ impl TokenProcessor {
         }
     }
 
-    fn process_all_tokens(&mut self, tokens: Vec<Token>) {
+    fn process_all_tokens(&mut self, tokens: Vec<Node>) {
         for token in tokens {
             self.process_token(token);
         }

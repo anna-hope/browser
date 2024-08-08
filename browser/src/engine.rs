@@ -1,5 +1,5 @@
 use crate::lex;
-use crate::lex::Token;
+use crate::lex::Node;
 use anyhow::{anyhow, Context};
 use octo_http::cache::Cache;
 use octo_http::request::{Request, RequestMethod, Response};
@@ -126,12 +126,12 @@ impl Engine {
         })
     }
 
-    fn load_and_parse_body(&mut self, url: WebUrl) -> anyhow::Result<Option<Vec<Token>>> {
+    fn load_and_parse_body(&mut self, url: WebUrl) -> anyhow::Result<Option<Vec<Node>>> {
         let response = self.load_or_maybe_cache(url)?;
         Ok(render_optional_body!(response.body))
     }
 
-    pub(crate) fn load(&mut self, url: &str) -> anyhow::Result<Option<Vec<Token>>> {
+    pub(crate) fn load(&mut self, url: &str) -> anyhow::Result<Option<Vec<Node>>> {
         let url = url
             .parse::<Url>()
             .inspect_err(|e| eprintln!("{e}"))
@@ -142,7 +142,7 @@ impl Engine {
             Url::File(url) => {
                 let contents = fs::read(&url.path).context(url.path)?;
                 let contents = String::from_utf8_lossy(&contents);
-                let tokens = vec![Token::Text(contents.to_string())];
+                let tokens = vec![Node::Text(contents.to_string())];
                 Ok(Some(tokens))
             }
             Url::Data(url) => {
@@ -157,7 +157,7 @@ impl Engine {
                 let body = match about_value {
                     AboutValue::Blank => "".to_string(),
                 };
-                let tokens = vec![Token::Text(body)];
+                let tokens = vec![Node::Text(body)];
                 Ok(Some(tokens))
             }
         }
