@@ -4,9 +4,9 @@ use unicode_segmentation::UnicodeSegmentation;
 const MAX_ENTITY_LEN: usize = 26;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Token {
+pub(crate) enum Token {
     Text(String),
-    Tag(String),
+    Element(String),
 }
 
 pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
@@ -75,7 +75,7 @@ pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {
             current_buf.clear();
         } else if grapheme == ">" && render {
             in_tag = false;
-            out.push(Token::Tag(current_buf.clone()));
+            out.push(Token::Element(current_buf.clone()));
             current_buf.clear();
         } else {
             current_buf.push_str(grapheme);

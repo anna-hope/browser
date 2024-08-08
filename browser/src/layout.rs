@@ -179,7 +179,7 @@ impl TokenProcessor {
             Token::Text(text) => {
                 self.process_text(text.as_str());
             }
-            Token::Tag(tag) => match tag.as_str() {
+            Token::Element(tag) => match tag.as_str() {
                 "i" => {
                     self.italics = true;
                 }
