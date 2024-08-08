@@ -3,10 +3,6 @@ use unicode_segmentation::UnicodeSegmentation;
 // AFAIK no entity in the spec is longer than 26 chars.
 const MAX_ENTITY_LEN: usize = 26;
 
-// pub(crate) struct Layout {
-//     display_list: Vec<Token>,
-// }
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Text(String),
