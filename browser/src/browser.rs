@@ -89,7 +89,7 @@ impl eframe::App for Browser {
                 self.scroll = f32::min(self.scroll + SCROLL_STEP, max_scroll);
             }
 
-            // Mouse wheel
+            // Mouse wheel (subtract the scroll delta instead of adding for "natural" scrolling)
             ui.input(|i| {
                 self.scroll = (self.scroll - i.smooth_scroll_delta.y).clamp(0., max_scroll)
             });
