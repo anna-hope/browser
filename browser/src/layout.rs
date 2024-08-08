@@ -19,6 +19,109 @@ pub(crate) enum ProcessedToken {
     LineBreak,
 }
 
+pub(crate) struct TokenProcessor {
+    pub(crate) processed_tokens: Vec<ProcessedToken>,
+    text_size: f32,
+    italics: bool,
+    color: egui::Color32,
+}
+
+impl Default for TokenProcessor {
+    fn default() -> Self {
+        Self {
+            processed_tokens: vec![],
+            text_size: DEFAULT_TEXT_SIZE_PIXELS,
+            italics: false,
+            color: egui::Color32::BLACK,
+        }
+    }
+}
+
+impl TokenProcessor {
+    pub(crate) fn from_tokens(tokens: Vec<Token>) -> Self {
+        let mut layout = Self::default();
+        layout.process_all_tokens(tokens);
+        layout
+    }
+
+    fn process_text(&mut self, text: &str) {
+        let font_id = egui::FontId::new(self.text_size, egui::FontFamily::Proportional);
+        let format = egui::text::TextFormat {
+            font_id,
+            italics: self.italics,
+            color: self.color,
+            valign: egui::Align::Min,
+            ..Default::default()
+        };
+        for word in text.split_whitespace() {
+            let mut layout_job = egui::text::LayoutJob::default();
+            layout_job.append(word, 0.0, format.clone());
+            self.processed_tokens.push(ProcessedToken::Text(layout_job));
+        }
+    }
+
+    fn process_token(&mut self, token: Token) {
+        match token {
+            Token::Text(text) => {
+                self.process_text(text.as_str());
+            }
+            Token::Element(tag) => match tag.as_str() {
+                "i" => {
+                    self.italics = true;
+                }
+                "/i" => {
+                    self.italics = false;
+                }
+                "b" => {
+                    self.color = egui::Color32::BLACK;
+                }
+                "/b" => {
+                    self.color = Default::default();
+                }
+                "small" => {
+                    self.text_size -= 2.;
+                }
+                "/small" => {
+                    self.text_size += 2.;
+                }
+                "big" => {
+                    self.text_size += 4.;
+                }
+                "/big" => {
+                    self.text_size -= 4.;
+                }
+                "sup" => {}
+                "/sup" => {}
+                "br" => {
+                    self.process_text("\n");
+                }
+                "/p" => {
+                    self.process_text("\n");
+                    self.processed_tokens.push(ProcessedToken::LineBreak);
+                }
+                _ => {}
+            },
+        }
+    }
+
+    fn process_all_tokens(&mut self, tokens: Vec<Token>) {
+        for token in tokens {
+            self.process_token(token);
+        }
+    }
+}
+
+struct LineItem {
+    galley: Arc<egui::Galley>,
+    x: f32,
+}
+
+impl LineItem {
+    fn new(galley: Arc<egui::Galley>, x: f32) -> Self {
+        Self { galley, x }
+    }
+}
+
 pub(crate) struct DisplayListItem {
     pub(crate) galley: Arc<egui::Galley>,
     pub(crate) pos: egui::Pos2,
@@ -131,107 +234,4 @@ fn get_max_ascent(galley: &egui::Galley) -> Option<f32> {
         .flat_map(|row| &row.glyphs)
         .map(|glyph| glyph.ascent)
         .reduce(f32::max)
-}
-
-pub(crate) struct TokenProcessor {
-    pub(crate) processed_tokens: Vec<ProcessedToken>,
-    text_size: f32,
-    italics: bool,
-    color: egui::Color32,
-}
-
-impl Default for TokenProcessor {
-    fn default() -> Self {
-        Self {
-            processed_tokens: vec![],
-            text_size: DEFAULT_TEXT_SIZE_PIXELS,
-            italics: false,
-            color: egui::Color32::BLACK,
-        }
-    }
-}
-
-impl TokenProcessor {
-    pub(crate) fn from_tokens(tokens: Vec<Token>) -> Self {
-        let mut layout = Self::default();
-        layout.process_all_tokens(tokens);
-        layout
-    }
-
-    fn process_text(&mut self, text: &str) {
-        let font_id = egui::FontId::new(self.text_size, egui::FontFamily::Proportional);
-        let format = egui::text::TextFormat {
-            font_id,
-            italics: self.italics,
-            color: self.color,
-            valign: egui::Align::Min,
-            ..Default::default()
-        };
-        for word in text.split_whitespace() {
-            let mut layout_job = egui::text::LayoutJob::default();
-            layout_job.append(word, 0.0, format.clone());
-            self.processed_tokens.push(ProcessedToken::Text(layout_job));
-        }
-    }
-
-    fn process_token(&mut self, token: Token) {
-        match token {
-            Token::Text(text) => {
-                self.process_text(text.as_str());
-            }
-            Token::Element(tag) => match tag.as_str() {
-                "i" => {
-                    self.italics = true;
-                }
-                "/i" => {
-                    self.italics = false;
-                }
-                "b" => {
-                    self.color = egui::Color32::BLACK;
-                }
-                "/b" => {
-                    self.color = Default::default();
-                }
-                "small" => {
-                    self.text_size -= 2.;
-                }
-                "/small" => {
-                    self.text_size += 2.;
-                }
-                "big" => {
-                    self.text_size += 4.;
-                }
-                "/big" => {
-                    self.text_size -= 4.;
-                }
-                "sup" => {}
-                "/sup" => {}
-                "br" => {
-                    self.process_text("\n");
-                }
-                "/p" => {
-                    self.process_text("\n");
-                    self.processed_tokens.push(ProcessedToken::LineBreak);
-                }
-                _ => {}
-            },
-        }
-    }
-
-    fn process_all_tokens(&mut self, tokens: Vec<Token>) {
-        for token in tokens {
-            self.process_token(token);
-        }
-    }
-}
-
-struct LineItem {
-    galley: Arc<egui::Galley>,
-    x: f32,
-}
-
-impl LineItem {
-    fn new(galley: Arc<egui::Galley>, x: f32) -> Self {
-        Self { galley, x }
-    }
 }
