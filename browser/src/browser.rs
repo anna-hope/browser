@@ -40,19 +40,6 @@ impl eframe::App for Browser {
 
             ui.spacing_mut().text_edit_width = ui.max_rect().width();
 
-            // Scroll up
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                self.scroll = f32::max(self.scroll - SCROLL_STEP, 0.);
-            }
-
-            // Scroll down
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                self.scroll += SCROLL_STEP;
-            }
-
-            // Mouse wheel
-            ui.input(|i| self.scroll = f32::max(self.scroll - i.smooth_scroll_delta.y, 0.));
-
             let response = ui.add(egui::TextEdit::singleline(&mut self.url));
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 self.scroll = 0.;
@@ -72,10 +59,30 @@ impl eframe::App for Browser {
                 }
             }
 
+            let top_margin = PADDING + response.rect.height();
+
             let display_list = Layout::display_list(&self.processed_tokens, ui);
+            let max_y = display_list
+                .iter()
+                .map(|item| item.pos.y - ui.min_rect().height())
+                .reduce(f32::max)
+                .unwrap_or(ui.min_rect().bottom())
+                + top_margin;
+
+            // Scroll up
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                self.scroll = f32::max(self.scroll - SCROLL_STEP, 0.);
+            }
+
+            // Scroll down
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                self.scroll = f32::min(self.scroll + SCROLL_STEP, max_y);
+            }
+
+            // Mouse wheel
+            ui.input(|i| self.scroll = (self.scroll - i.smooth_scroll_delta.y).clamp(0., max_y));
 
             // Account for the address bar;
-            let top_margin = PADDING + response.rect.height();
             for item in display_list {
                 let pos = egui::Pos2::new(item.pos.x, item.pos.y - self.scroll + top_margin);
                 if pos.y < top_margin || pos.y > ui.min_rect().bottom() {
