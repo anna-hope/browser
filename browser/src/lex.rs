@@ -1,3 +1,4 @@
+use slotmap::{DefaultKey, SlotMap};
 use unicode_segmentation::UnicodeSegmentation;
 
 // AFAIK no entity in the spec is longer than 26 chars.
@@ -7,6 +8,15 @@ const MAX_ENTITY_LEN: usize = 26;
 pub(crate) enum Token {
     Text(String),
     Element(String),
+}
+
+pub type NodeKey = DefaultKey;
+
+#[derive(Debug)]
+pub(crate) struct Node {
+    token: Token,
+    children: Vec<NodeKey>,
+    parent: NodeKey,
 }
 
 pub(crate) fn lex(body: &str, render: bool) -> Vec<Token> {

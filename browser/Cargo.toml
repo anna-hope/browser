@@ -10,6 +10,7 @@ unicode-segmentation = "1.11.0"
 octo-http = { path = "../http" }
 octo-url = { path = "../url" }
 eframe = { version = "0.28.1", features = ["wgpu"] }
+slotmap = "1"
 
 [lints]
 workspace = true
