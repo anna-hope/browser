@@ -88,46 +88,47 @@ impl<'tree> NodeRef<'tree> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct HtmlTree {
-    root: Node,
+    root_key: NodeKey,
     node_map: NodeMap,
 }
 
 impl HtmlTree {
-    fn new(root: Node, node_map: NodeMap) -> Self {
-        Self { root, node_map }
+    fn new(root_key: NodeKey, node_map: NodeMap) -> Self {
+        Self { root_key, node_map }
     }
 
     pub(crate) fn root(&self) -> NodeRef {
-        NodeRef::new(&self.root, &self.node_map)
+        let root = self
+            .node_map
+            .get(self.root_key)
+            .expect("The root key doesn't map to any node in the NodeMap");
+        NodeRef::new(root, &self.node_map)
     }
 }
 
 pub(crate) struct HtmlParser {
-    body: String,
-    unfinished: Vec<Node>,
+    unfinished: Vec<NodeKey>,
     node_map: NodeMap,
     parse_tags: bool,
 }
 
 impl HtmlParser {
-    fn new(body: String, parse_tags: bool) -> Self {
+    fn new(parse_tags: bool) -> Self {
         Self {
-            body,
             unfinished: vec![],
             node_map: SlotMap::new(),
             parse_tags,
         }
     }
 
-    fn parse(&mut self) {
+    fn parse(mut self, body: String) -> Option<HtmlTree> {
         let mut in_tag = false;
         let mut current_entity = String::new();
         let mut skip_entity = false;
 
         let mut current_buf = String::new();
         // TODO: Think of a way of getting all the graphemes without allocating another Vec
-        let graphemes =
-            UnicodeSegmentation::graphemes(self.body.as_str(), true).collect::<Vec<_>>();
+        let graphemes = UnicodeSegmentation::graphemes(body.as_str(), true).collect::<Vec<_>>();
 
         let mut current_index = 0;
 
@@ -196,22 +197,84 @@ impl HtmlParser {
         if !in_tag && !current_buf.is_empty() {
             self.add_text(current_buf)
         }
+
+        Some(HtmlTree::new(self.finish()?, self.node_map))
     }
 
     fn add_text(&mut self, text: String) {
-        todo!()
+        let parent_key = self
+            .unfinished
+            .last()
+            .expect("No parent node to add this text to");
+        let data = NodeData::Text(text);
+        let node_key = self
+            .node_map
+            .insert_with_key(|key| Node::new(key, data, Some(*parent_key)));
+        let parent = self
+            .node_map
+            .get_mut(*parent_key)
+            .expect("This parent key doesn't map to any Node in the NodeMap");
+        match parent.data {
+            NodeData::Element(ref mut element) => element.children.push(node_key),
+            _ => panic!(
+                "Parent data must be NodeData::Element, got {:?}",
+                parent.data
+            ),
+        }
     }
 
     fn add_tag(&mut self, tag: String) {
-        todo!()
+        if tag.starts_with('/') {
+            // "The last tag is an edge case, because there's no unfinished node to add it to."
+            if self.unfinished.len() == 1 {
+                return;
+            }
+
+            let node_key = self.unfinished.pop().expect("No node keys in unfinished");
+            let parent_key = self.unfinished.last().expect("No node keys in unfinished");
+            let parent = self
+                .node_map
+                .get_mut(*parent_key)
+                .expect("The parent key doesn't map to any Node in the NodeMap");
+
+            match parent.data {
+                NodeData::Element(ref mut element) => element.children.push(node_key),
+                _ => panic!("Parent must be NodeData::Element, got {:?}", parent.data),
+            }
+        } else {
+            let parent = self.unfinished.last();
+            let data = NodeData::Element(Element {
+                tag,
+                children: vec![],
+            });
+            let node_key = self
+                .node_map
+                .insert_with_key(|key| Node::new(key, data, parent.copied()));
+            self.unfinished.push(node_key);
+        }
+    }
+
+    fn finish(&mut self) -> Option<NodeKey> {
+        while self.unfinished.len() > 1 {
+            // Ok to unwrap here because we definitely have > 1 keys in unfinished.
+            #[allow(clippy::unwrap_used)]
+            let node_key = self.unfinished.pop().unwrap();
+            let parent_key = *self.unfinished.last().unwrap();
+            let parent = self
+                .node_map
+                .get_mut(parent_key)
+                .expect("This parent key doesn't map to any Node in the NodeMap");
+            match parent.data {
+                NodeData::Element(ref mut element) => element.children.push(node_key),
+                _ => panic!("Parent must be NodeData::Element, got {:?}", parent.data),
+            }
+        }
+        self.unfinished.pop()
     }
 }
 
 pub(crate) fn parse(body: String, parse_tags: bool) -> Option<HtmlTree> {
-    let mut parser = HtmlParser::new(body, parse_tags);
-    parser.parse();
-    let root_node = parser.unfinished.pop()?;
-    Some(HtmlTree::new(root_node, parser.node_map))
+    HtmlParser::new(parse_tags).parse(body)
 }
 
 #[cfg(test)]
@@ -224,7 +287,7 @@ mod tests {
         let parsed = parse(example.to_string(), true).expect("Must have root node");
         let text = "<div>".to_string();
         let expected = NodeData::Text(text);
-        assert_eq!(parsed.root.data, expected);
+        assert_eq!(parsed.root().data(), &expected);
     }
 
     #[test]
@@ -233,6 +296,6 @@ mod tests {
         let parsed = parse(example.to_string(), true).expect("Must have root node");
         let text = example.to_string();
         let expected = NodeData::Text(text);
-        assert_eq!(parsed.root.data, expected);
+        assert_eq!(parsed.root().data(), &expected);
     }
 }
